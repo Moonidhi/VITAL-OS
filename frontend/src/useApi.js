@@ -47,3 +47,48 @@ export function usePolledEndpoint(path, intervalMs = 5000) {
 
   return { data, error, loading, lastUpdated }
 }
+
+/**
+ * Hook to continuously check backend health via GET /health.
+ * Considers backend online whenever /health responds successfully with HTTP 200.
+ */
+export function useHealthCheck(intervalMs = 5000) {
+  const [connected, setConnected] = useState(false)
+  const [lastUpdated, setLastUpdated] = useState(null)
+
+  useEffect(() => {
+    let cancelled = false
+
+    async function checkHealth() {
+      try {
+        const res = await fetch(`${API_BASE}/health`)
+        if (res.ok) {
+          const json = await res.json().catch(() => ({}))
+          // Backend is considered online whenever /health responds with HTTP 200 (res.ok)
+          const isOnline = res.ok && (json.status === 'ok' || json.status === 'healthy' || !json.status)
+          if (!cancelled) {
+            setConnected(Boolean(isOnline))
+            setLastUpdated(new Date())
+          }
+        } else {
+          if (!cancelled) {
+            setConnected(false)
+          }
+        }
+      } catch (_) {
+        if (!cancelled) {
+          setConnected(false)
+        }
+      }
+    }
+
+    checkHealth()
+    const timer = setInterval(checkHealth, intervalMs)
+    return () => {
+      cancelled = true
+      clearInterval(timer)
+    }
+  }, [intervalMs])
+
+  return { connected, lastUpdated }
+}

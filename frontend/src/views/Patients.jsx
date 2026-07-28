@@ -6,7 +6,7 @@ export default function Patients() {
     <div className="flex h-screen overflow-hidden font-body">
       <Sidebar />
       <div className="flex flex-col flex-1 min-w-0 overflow-hidden">
-        <Header connected={false} lastUpdated={null} onRefresh={() => {}} />
+        <Header title="Patient Clinical Triage" />
         <main className="flex-1 overflow-y-auto px-6 py-5">
           <div className="flex flex-col items-center justify-center h-full gap-4 text-center">
             <div className="w-12 h-12 rounded-xl bg-base-elevated border border-base-border flex items-center justify-center">

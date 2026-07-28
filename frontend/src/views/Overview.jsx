@@ -61,7 +61,7 @@ export default function Overview() {
     loading: predLoading,
   } = usePolledEndpoint('/ai/predict', 10000)
 
-  const connected = !snapError && !snapLoading
+  const connected = !snapError
 
   // Accumulate snapshot history for the rolling chart (last 96 points = 24h)
   useEffect(() => {

@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useHealthCheck } from '../useApi.js'
 
 function SignalIcon({ connected }) {
   return (
@@ -19,8 +20,12 @@ function RefreshIcon() {
   )
 }
 
-export default function Header({ connected, lastUpdated, onRefresh }) {
+export default function Header({ title = "Energy Overview", connected, lastUpdated, onRefresh }) {
   const [clock, setClock] = useState(new Date())
+  const health = useHealthCheck(5000)
+
+  const isConnected = typeof connected === 'boolean' ? connected : health.connected
+  const effectiveLastUpdated = lastUpdated || health.lastUpdated
 
   useEffect(() => {
     const t = setInterval(() => setClock(new Date()), 1000)
@@ -31,8 +36,8 @@ export default function Header({ connected, lastUpdated, onRefresh }) {
   const timeStr = `${pad(clock.getHours())}:${pad(clock.getMinutes())}:${pad(clock.getSeconds())}`
   const dateStr = clock.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })
 
-  const updatedStr = lastUpdated
-    ? `${pad(lastUpdated.getHours())}:${pad(lastUpdated.getMinutes())}:${pad(lastUpdated.getSeconds())}`
+  const updatedStr = effectiveLastUpdated
+    ? `${pad(effectiveLastUpdated.getHours())}:${pad(effectiveLastUpdated.getMinutes())}:${pad(effectiveLastUpdated.getSeconds())}`
     : '—'
 
   return (
@@ -40,7 +45,7 @@ export default function Header({ connected, lastUpdated, onRefresh }) {
       <div className="flex items-center gap-4">
         <div>
           <h1 className="font-display font-semibold text-sm text-text-primary tracking-wide">
-            Energy Overview
+            {title}
           </h1>
           <p className="text-xs text-text-faint">{dateStr}</p>
         </div>
@@ -48,13 +53,13 @@ export default function Header({ connected, lastUpdated, onRefresh }) {
 
       <div className="flex items-center gap-5">
         <div className="flex items-center gap-2">
-          <SignalIcon connected={connected} />
-          <span className={`text-xs font-medium ${connected ? 'text-gridok' : 'text-gridout'}`}>
-            {connected ? 'Backend connected' : 'Backend offline'}
+          <SignalIcon connected={isConnected} />
+          <span className={`text-xs font-medium ${isConnected ? 'text-gridok' : 'text-gridout'}`}>
+            {isConnected ? 'Backend connected' : 'Backend offline'}
           </span>
         </div>
 
-        {connected && (
+        {isConnected && (
           <span className="text-xs text-text-faint">
             Updated {updatedStr}
           </span>
