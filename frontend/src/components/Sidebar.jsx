@@ -1,4 +1,5 @@
 import { NavLink } from 'react-router-dom'
+import { usePolledEndpoint } from '../useApi.js'
 
 const NAV_ITEMS = [
   { label: 'Overview',    to: '/',            icon: GridIcon    },
@@ -58,6 +59,9 @@ function BellIcon({ className }) {
 }
 
 export default function Sidebar() {
+  const { data: alertStats } = usePolledEndpoint('/alerts/stats', 8000)
+  const criticalCount = alertStats?.critical_alerts ?? 0
+
   return (
     <aside className="hidden md:flex w-60 shrink-0 flex-col border-r border-base-border bg-base-surface/60 backdrop-blur-sm">
       <div className="flex items-center gap-2.5 px-5 h-16 border-b border-base-border">
@@ -86,7 +90,15 @@ export default function Sidebar() {
           >
             <Icon className="w-4 h-4 shrink-0" />
             <span>{label}</span>
-            {/* Active dot rendered via NavLink's isActive — inline so it stays DRY */}
+
+            {/* Critical Alert Badge */}
+            {label === 'Alerts' && criticalCount > 0 && (
+              <span className="px-1.5 py-0.2 text-[10px] font-bold rounded-full bg-rose-500 text-white animate-pulse">
+                {criticalCount}
+              </span>
+            )}
+
+            {/* Active dot rendered via NavLink's isActive */}
             <span className="ml-auto">
               <ActiveDot to={to} />
             </span>

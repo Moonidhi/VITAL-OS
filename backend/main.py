@@ -86,14 +86,116 @@ class SimulationHistory(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
 
+class Alert(Base):
+    __tablename__ = "alerts"
+
+    id = Column(Integer, primary_key=True, index=True)
+    timestamp = Column(String, index=True, nullable=False)
+    severity = Column(String, index=True, nullable=False)       # INFO, WARNING, CRITICAL
+    title = Column(String, nullable=False)
+    message = Column(String, nullable=False)
+    source = Column(String, index=True, nullable=False)        # GRID, BATTERY, LOAD_FORECAST, RENEWABLE, SYSTEM
+    status = Column(String, index=True, nullable=False, default="ACTIVE")  # ACTIVE, ACKNOWLEDGED, RESOLVED
+    acknowledged_at = Column(String, nullable=True)
+    resolved_at = Column(String, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
 # Create tables on startup if they don't already exist
 Base.metadata.create_all(bind=engine)
+
+
+def evaluate_and_create_alerts(db: Session, snapshot: dict):
+    """
+    Evaluates microgrid telemetry snapshot for alert conditions (Grid outages,
+    low battery SOC, load surplus deficits, renewable coverage) and creates new
+    ACTIVE alerts if no matching active/acknowledged alert currently exists.
+    """
+    if not snapshot:
+        return
+
+    ts = snapshot.get("timestamp", datetime.utcnow().isoformat())
+    grid_status = snapshot.get("grid_status", "NORMAL")
+    soc = float(snapshot.get("battery_soc_percent", 100.0))
+    total_load = float(snapshot.get("total_load_kw", 0.0))
+    solar = float(snapshot.get("solar_kw", 0.0))
+    wind = float(snapshot.get("wind_kw", 0.0))
+    ren_gen = float(snapshot.get("total_generation_kw", solar + wind))
+    net_bal = float(snapshot.get("net_balance_kw", ren_gen - total_load))
+
+    potential_alerts = []
+
+    # 1. Grid Outage Condition
+    if grid_status == "OUTAGE":
+        potential_alerts.append({
+            "severity": "CRITICAL",
+            "title": "Grid Power Outage Detected",
+            "message": "Utility grid power outage detected. Hospital operating on microgrid and battery reserves.",
+            "source": "GRID",
+        })
+
+    # 2. Battery SOC Conditions
+    if soc < 20.0:
+        potential_alerts.append({
+            "severity": "CRITICAL",
+            "title": "Critical Battery Reserve",
+            "message": f"Battery State of Charge is critically low at {soc:.1f}%. Immediate load shedding recommended.",
+            "source": "BATTERY",
+        })
+    elif soc < 35.0:
+        potential_alerts.append({
+            "severity": "WARNING",
+            "title": "Low Battery Reserve",
+            "message": f"Battery State of Charge is low at {soc:.1f}%. Monitor battery usage closely.",
+            "source": "BATTERY",
+        })
+
+    # 3. Power Generation Deficit / Surplus Deficit
+    if net_bal < -50.0:
+        potential_alerts.append({
+            "severity": "WARNING",
+            "title": "Microgrid Power Generation Deficit",
+            "message": f"Hospital load ({total_load:.1f} kW) exceeds renewable generation ({ren_gen:.1f} kW) by {abs(net_bal):.1f} kW.",
+            "source": "LOAD_FORECAST",
+        })
+
+    # 4. Low Renewable Energy Coverage
+    if total_load > 0 and (ren_gen / total_load) < 0.30:
+        coverage_pct = (ren_gen / total_load) * 100.0
+        potential_alerts.append({
+            "severity": "WARNING",
+            "title": "Low Renewable Energy Coverage",
+            "message": f"Renewable energy sources are currently providing only {coverage_pct:.1f}% of hospital power demand.",
+            "source": "RENEWABLE",
+        })
+
+    # Deduplication and insertion
+    for item in potential_alerts:
+        existing = db.query(Alert).filter(
+            Alert.source == item["source"],
+            Alert.title == item["title"],
+            Alert.status.in_(["ACTIVE", "ACKNOWLEDGED"])
+        ).first()
+
+        if not existing:
+            new_alert = Alert(
+                timestamp=ts,
+                severity=item["severity"],
+                title=item["title"],
+                message=item["message"],
+                source=item["source"],
+                status="ACTIVE",
+            )
+            db.add(new_alert)
+
+    db.commit()
 
 
 def save_snapshots_to_db(db: Session, snapshots: list[dict]):
     """
     Persists a list of simulation snapshot dictionaries into the SQLite database.
     Skips snapshots whose timestamps already exist in the simulation_history table.
+    Also triggers alert evaluation for each snapshot.
     """
     if not snapshots:
         return
@@ -107,6 +209,8 @@ def save_snapshots_to_db(db: Session, snapshots: list[dict]):
 
     new_records = []
     for s in snapshots:
+        evaluate_and_create_alerts(db, s)
+
         ts = s["timestamp"]
         if ts in existing:
             continue
@@ -521,4 +625,163 @@ def ai_status():
         "rmse": round(model.rmse, 4),
         "model": model.model_name,
         "last_trained": model.last_trained,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Alert Management Endpoints
+# ---------------------------------------------------------------------------
+
+@app.get("/alerts")
+def get_alerts(
+    severity: Optional[str] = Query(None, description="Filter by severity: INFO, WARNING, CRITICAL"),
+    status: Optional[str] = Query(None, description="Filter by status: ACTIVE, ACKNOWLEDGED, RESOLVED"),
+    from_time: Optional[str] = Query(None, description="Start ISO timestamp"),
+    to_time: Optional[str] = Query(None, description="End ISO timestamp"),
+    limit: int = Query(100, ge=1, le=1000, description="Max alerts to return"),
+    db: Session = Depends(get_db),
+):
+    """
+    Query alerts with optional filtering by severity, status, and date range.
+    """
+    query = db.query(Alert)
+
+    if severity:
+        query = query.filter(Alert.severity == severity.upper())
+
+    if status:
+        query = query.filter(Alert.status == status.upper())
+
+    if from_time:
+        try:
+            datetime.fromisoformat(from_time.replace("Z", "+00:00"))
+        except Exception:
+            raise HTTPException(status_code=400, detail="Invalid 'from_time' ISO format.")
+        query = query.filter(Alert.timestamp >= from_time)
+
+    if to_time:
+        try:
+            datetime.fromisoformat(to_time.replace("Z", "+00:00"))
+        except Exception:
+            raise HTTPException(status_code=400, detail="Invalid 'to_time' ISO format.")
+        query = query.filter(Alert.timestamp <= to_time)
+
+    records = query.order_by(Alert.id.desc()).limit(limit).all()
+
+    return [
+        {
+            "id": a.id,
+            "timestamp": a.timestamp,
+            "severity": a.severity,
+            "title": a.title,
+            "message": a.message,
+            "source": a.source,
+            "status": a.status,
+            "acknowledged_at": a.acknowledged_at,
+            "resolved_at": a.resolved_at,
+            "created_at": a.created_at.isoformat() if a.created_at else None,
+        }
+        for a in records
+    ]
+
+
+@app.get("/alerts/stats")
+def get_alert_stats(db: Session = Depends(get_db)):
+    """
+    Return summary statistics for alert management dashboard.
+    """
+    total = db.query(func.count(Alert.id)).scalar() or 0
+    active = db.query(func.count(Alert.id)).filter(Alert.status == "ACTIVE").scalar() or 0
+    acknowledged = db.query(func.count(Alert.id)).filter(Alert.status == "ACKNOWLEDGED").scalar() or 0
+    resolved = db.query(func.count(Alert.id)).filter(Alert.status == "RESOLVED").scalar() or 0
+    critical = db.query(func.count(Alert.id)).filter(
+        Alert.severity == "CRITICAL",
+        Alert.status.in_(["ACTIVE", "ACKNOWLEDGED"])
+    ).scalar() or 0
+
+    return {
+        "total_alerts": total,
+        "active_alerts": active,
+        "acknowledged_alerts": acknowledged,
+        "resolved_alerts": resolved,
+        "critical_alerts": critical,
+    }
+
+
+@app.get("/alerts/{alert_id}")
+def get_alert_by_id(alert_id: int, db: Session = Depends(get_db)):
+    """
+    Fetch a single alert by ID.
+    """
+    alert = db.query(Alert).filter(Alert.id == alert_id).first()
+    if not alert:
+        raise HTTPException(status_code=404, detail="Alert not found")
+
+    return {
+        "id": alert.id,
+        "timestamp": alert.timestamp,
+        "severity": alert.severity,
+        "title": alert.title,
+        "message": alert.message,
+        "source": alert.source,
+        "status": alert.status,
+        "acknowledged_at": alert.acknowledged_at,
+        "resolved_at": alert.resolved_at,
+        "created_at": alert.created_at.isoformat() if alert.created_at else None,
+    }
+
+
+@app.patch("/alerts/{alert_id}/acknowledge")
+def acknowledge_alert(alert_id: int, db: Session = Depends(get_db)):
+    """
+    Acknowledge an active alert.
+    """
+    alert = db.query(Alert).filter(Alert.id == alert_id).first()
+    if not alert:
+        raise HTTPException(status_code=404, detail="Alert not found")
+
+    alert.status = "ACKNOWLEDGED"
+    alert.acknowledged_at = datetime.utcnow().isoformat()
+    db.commit()
+    db.refresh(alert)
+
+    return {
+        "id": alert.id,
+        "timestamp": alert.timestamp,
+        "severity": alert.severity,
+        "title": alert.title,
+        "message": alert.message,
+        "source": alert.source,
+        "status": alert.status,
+        "acknowledged_at": alert.acknowledged_at,
+        "resolved_at": alert.resolved_at,
+        "created_at": alert.created_at.isoformat() if alert.created_at else None,
+    }
+
+
+@app.patch("/alerts/{alert_id}/resolve")
+def resolve_alert(alert_id: int, db: Session = Depends(get_db)):
+    """
+    Resolve an active or acknowledged alert.
+    """
+    alert = db.query(Alert).filter(Alert.id == alert_id).first()
+    if not alert:
+        raise HTTPException(status_code=404, detail="Alert not found")
+
+    alert.status = "RESOLVED"
+    alert.resolved_at = datetime.utcnow().isoformat()
+    db.commit()
+    db.refresh(alert)
+
+    return {
+        "id": alert.id,
+        "timestamp": alert.timestamp,
+        "severity": alert.severity,
+        "title": alert.title,
+        "message": alert.message,
+        "source": alert.source,
+        "status": alert.status,
+        "acknowledged_at": alert.acknowledged_at,
+        "resolved_at": alert.resolved_at,
+        "created_at": alert.created_at.isoformat() if alert.created_at else None,
     }
