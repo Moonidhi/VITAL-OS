@@ -81,8 +81,8 @@ By leveraging machine learning (`GradientBoostingRegressor`), VITAL-OS forecasts
 ### 1️⃣ Clone the Repository
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/vital-os.git
-cd vital-os
+git clone https://github.com/Moonidhi/VITAL-OS.git
+cd VITAL-OS
 ```
 
 ---
