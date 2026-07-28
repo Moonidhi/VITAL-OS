@@ -6,12 +6,14 @@ Run with:
     uvicorn main:app --reload --port 8000
 """
 
+import csv
+import io
 from datetime import datetime, timedelta
 from typing import Optional
 
-from fastapi import FastAPI, Depends, HTTPException
+from fastapi import FastAPI, Depends, HTTPException, Query, Response
 from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy import create_engine, Column, Integer, String, Float, DateTime, text
+from sqlalchemy import create_engine, Column, Integer, String, Float, DateTime, text, func
 from sqlalchemy.orm import sessionmaker, declarative_base, Session
 from pydantic import BaseModel
 
@@ -43,7 +45,7 @@ def get_db():
 
 
 # ---------------------------------------------------------------------------
-# Models (minimal placeholder schema — extend in later steps)
+# Models
 # ---------------------------------------------------------------------------
 
 class Patient(Base):
@@ -63,8 +65,78 @@ class Patient(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
 
+class SimulationHistory(Base):
+    __tablename__ = "simulation_history"
+
+    id = Column(Integer, primary_key=True, index=True)
+    timestamp = Column(String, index=True, nullable=False, unique=True)
+    solar_kw = Column(Float, nullable=False)
+    wind_kw = Column(Float, nullable=False)
+    battery_soc_percent = Column(Float, nullable=False)
+    battery_power_kw = Column(Float, nullable=False)
+    total_load_kw = Column(Float, nullable=False)
+    renewable_generation_kw = Column(Float, nullable=False)
+    grid_import_kw = Column(Float, nullable=False)
+    grid_export_kw = Column(Float, nullable=False)
+    net_balance_kw = Column(Float, nullable=False)
+    grid_status = Column(String, nullable=True)
+    ai_prediction_kw = Column(Float, nullable=True)
+    risk_level = Column(String, nullable=True)
+    recommendation = Column(String, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
 # Create tables on startup if they don't already exist
 Base.metadata.create_all(bind=engine)
+
+
+def save_snapshots_to_db(db: Session, snapshots: list[dict]):
+    """
+    Persists a list of simulation snapshot dictionaries into the SQLite database.
+    Skips snapshots whose timestamps already exist in the simulation_history table.
+    """
+    if not snapshots:
+        return
+
+    timestamps = [s["timestamp"] for s in snapshots]
+    existing = set(
+        res[0] for res in db.query(SimulationHistory.timestamp).filter(
+            SimulationHistory.timestamp.in_(timestamps)
+        ).all()
+    )
+
+    new_records = []
+    for s in snapshots:
+        ts = s["timestamp"]
+        if ts in existing:
+            continue
+        existing.add(ts)
+
+        solar = float(s.get("solar_kw", 0.0))
+        wind = float(s.get("wind_kw", 0.0))
+        ren_gen = float(s.get("total_generation_kw", solar + wind))
+
+        rec = SimulationHistory(
+            timestamp=ts,
+            solar_kw=solar,
+            wind_kw=wind,
+            battery_soc_percent=float(s.get("battery_soc_percent", 0.0)),
+            battery_power_kw=float(s.get("battery_power_kw", 0.0)),
+            total_load_kw=float(s.get("total_load_kw", 0.0)),
+            renewable_generation_kw=ren_gen,
+            grid_import_kw=float(s.get("grid_import_kw", 0.0)),
+            grid_export_kw=float(s.get("grid_export_kw", 0.0)),
+            net_balance_kw=float(s.get("net_balance_kw", 0.0)),
+            grid_status=s.get("grid_status", "NORMAL"),
+            ai_prediction_kw=s.get("ai_prediction_kw"),
+            risk_level=s.get("risk_level"),
+            recommendation=s.get("recommendation"),
+        )
+        new_records.append(rec)
+
+    if new_records:
+        db.add_all(new_records)
+        db.commit()
 
 
 # ---------------------------------------------------------------------------
@@ -172,38 +244,47 @@ def get_patient(patient_id: int, db: Session = Depends(get_db)):
 
 
 # ---------------------------------------------------------------------------
-# Simulation endpoints (Milestone 3)
+# Simulation endpoints
 # ---------------------------------------------------------------------------
 
 @app.get("/simulation/current")
-def get_current_simulation_snapshot():
+def get_current_simulation_snapshot(db: Session = Depends(get_db)):
     """
     Return the latest simulation snapshot.
 
     If the simulator hasn't taken any steps yet, advance it by one
     interval first so there's always a snapshot to return.
+    Automatically persists snapshot to database.
     """
     if not simulator.history:
         simulator.step()
+
+    # Save all accumulated history to DB to ensure completeness
+    all_snapshots = [s.to_dict() for s in simulator.history]
+    save_snapshots_to_db(db, all_snapshots)
+
     latest = simulator.history[-1]
     return latest.to_dict()
 
 
 @app.get("/simulation/run")
-def run_simulation(intervals: int = INTERVALS_PER_DAY):
+def run_simulation(intervals: int = INTERVALS_PER_DAY, db: Session = Depends(get_db)):
     """
-    Advance the simulator by `intervals` steps (default: 96, i.e. one full day)
-    and return every snapshot produced as JSON.
+    Advance the simulator by `intervals` steps (default: 96, i.e. one full day),
+    automatically save to database, and return every snapshot produced as JSON.
     """
     if intervals <= 0:
         raise HTTPException(status_code=400, detail="intervals must be a positive integer")
 
     df = simulator.run(intervals=intervals)
-    return df.to_dict(orient="records")
+    records = df.to_dict(orient="records")
+
+    save_snapshots_to_db(db, records)
+    return records
 
 
 @app.get("/simulation/day-summary")
-def get_simulation_day_summary():
+def get_simulation_day_summary(db: Session = Depends(get_db)):
     """
     Summarize the simulator's accumulated history:
     total solar/wind generation, total hospital load, battery SOC range,
@@ -225,6 +306,162 @@ def get_simulation_day_summary():
         "battery_soc_min_percent": round(df["battery_soc_percent"].min(), 2),
         "battery_soc_max_percent": round(df["battery_soc_percent"].max(), 2),
         "outage_intervals": int((df["grid_status"] == "OUTAGE").sum()),
+    }
+
+
+@app.get("/simulation/history")
+def get_simulation_history(
+    from_time: Optional[str] = Query(None, description="Start ISO timestamp (inclusive)"),
+    to_time: Optional[str] = Query(None, description="End ISO timestamp (inclusive)"),
+    limit: int = Query(100, ge=1, le=1000, description="Max records to return"),
+    db: Session = Depends(get_db),
+):
+    """
+    Query historical simulation telemetry from the database with optional filtering and limit.
+    """
+    query = db.query(SimulationHistory)
+
+    if from_time:
+        try:
+            datetime.fromisoformat(from_time.replace("Z", "+00:00"))
+        except Exception:
+            raise HTTPException(status_code=400, detail="Invalid 'from_time' ISO format.")
+        query = query.filter(SimulationHistory.timestamp >= from_time)
+
+    if to_time:
+        try:
+            datetime.fromisoformat(to_time.replace("Z", "+00:00"))
+        except Exception:
+            raise HTTPException(status_code=400, detail="Invalid 'to_time' ISO format.")
+        query = query.filter(SimulationHistory.timestamp <= to_time)
+
+    records = query.order_by(SimulationHistory.timestamp.desc()).limit(limit).all()
+
+    return [
+        {
+            "id": r.id,
+            "timestamp": r.timestamp,
+            "solar_kw": r.solar_kw,
+            "wind_kw": r.wind_kw,
+            "battery_soc_percent": r.battery_soc_percent,
+            "battery_power_kw": r.battery_power_kw,
+            "total_load_kw": r.total_load_kw,
+            "renewable_generation_kw": r.renewable_generation_kw,
+            "grid_import_kw": r.grid_import_kw,
+            "grid_export_kw": r.grid_export_kw,
+            "net_balance_kw": r.net_balance_kw,
+            "grid_status": r.grid_status,
+            "ai_prediction_kw": r.ai_prediction_kw,
+            "risk_level": r.risk_level,
+            "recommendation": r.recommendation,
+            "created_at": r.created_at.isoformat() if r.created_at else None,
+        }
+        for r in records
+    ]
+
+
+@app.get("/simulation/export")
+def export_simulation_csv(
+    from_time: Optional[str] = Query(None, description="Start ISO timestamp"),
+    to_time: Optional[str] = Query(None, description="End ISO timestamp"),
+    limit: int = Query(1000, ge=1, le=5000, description="Max records to export"),
+    db: Session = Depends(get_db),
+):
+    """
+    Export historical simulation telemetry as a CSV download.
+    """
+    query = db.query(SimulationHistory)
+
+    if from_time:
+        try:
+            datetime.fromisoformat(from_time.replace("Z", "+00:00"))
+        except Exception:
+            raise HTTPException(status_code=400, detail="Invalid 'from_time' ISO format.")
+        query = query.filter(SimulationHistory.timestamp >= from_time)
+
+    if to_time:
+        try:
+            datetime.fromisoformat(to_time.replace("Z", "+00:00"))
+        except Exception:
+            raise HTTPException(status_code=400, detail="Invalid 'to_time' ISO format.")
+        query = query.filter(SimulationHistory.timestamp <= to_time)
+
+    records = query.order_by(SimulationHistory.timestamp.asc()).limit(limit).all()
+
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow([
+        "timestamp",
+        "solar_kw",
+        "wind_kw",
+        "battery_soc_percent",
+        "battery_power_kw",
+        "total_load_kw",
+        "renewable_generation_kw",
+        "grid_import_kw",
+        "grid_export_kw",
+        "net_balance_kw",
+        "grid_status",
+        "ai_prediction_kw",
+        "risk_level",
+        "recommendation",
+    ])
+
+    for r in records:
+        writer.writerow([
+            r.timestamp,
+            r.solar_kw,
+            r.wind_kw,
+            r.battery_soc_percent,
+            r.battery_power_kw,
+            r.total_load_kw,
+            r.renewable_generation_kw,
+            r.grid_import_kw,
+            r.grid_export_kw,
+            r.net_balance_kw,
+            r.grid_status,
+            r.ai_prediction_kw if r.ai_prediction_kw is not None else "",
+            r.risk_level or "",
+            r.recommendation or "",
+        ])
+
+    csv_content = output.getvalue()
+    return Response(
+        content=csv_content,
+        media_type="text/csv",
+        headers={"Content-Disposition": 'attachment; filename="simulation_history.csv"'},
+    )
+
+
+@app.get("/simulation/stats")
+def get_simulation_stats(db: Session = Depends(get_db)):
+    """
+    Return summary statistics over historical simulation database records.
+    """
+    total_records = db.query(func.count(SimulationHistory.id)).scalar() or 0
+    if total_records == 0:
+        return {
+            "total_records": 0,
+            "oldest_record": None,
+            "newest_record": None,
+            "avg_hospital_load_kw": None,
+            "avg_renewable_generation_kw": None,
+            "avg_battery_soc_percent": None,
+        }
+
+    oldest = db.query(func.min(SimulationHistory.timestamp)).scalar()
+    newest = db.query(func.max(SimulationHistory.timestamp)).scalar()
+    avg_load = db.query(func.avg(SimulationHistory.total_load_kw)).scalar()
+    avg_ren = db.query(func.avg(SimulationHistory.renewable_generation_kw)).scalar()
+    avg_soc = db.query(func.avg(SimulationHistory.battery_soc_percent)).scalar()
+
+    return {
+        "total_records": total_records,
+        "oldest_record": oldest,
+        "newest_record": newest,
+        "avg_hospital_load_kw": round(avg_load, 2) if avg_load is not None else None,
+        "avg_renewable_generation_kw": round(avg_ren, 2) if avg_ren is not None else None,
+        "avg_battery_soc_percent": round(avg_soc, 2) if avg_soc is not None else None,
     }
 
 

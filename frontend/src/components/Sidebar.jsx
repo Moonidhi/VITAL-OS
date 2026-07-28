@@ -5,6 +5,7 @@ const NAV_ITEMS = [
   { label: 'Patients',    to: '/patients',    icon: PulseIcon   },
   { label: 'Microgrid',   to: '/microgrid',   icon: BoltIcon    },
   { label: 'Departments', to: '/departments', icon: BuildingIcon },
+  { label: 'Analytics',   to: '/analytics',   icon: ChartIcon   },
   { label: 'Alerts',      to: '/alerts',      icon: BellIcon    },
 ]
 
@@ -37,6 +38,13 @@ function BuildingIcon({ className }) {
     <svg viewBox="0 0 20 20" fill="none" className={className}>
       <rect x="4" y="3" width="9" height="14" rx="1" stroke="currentColor" strokeWidth="1.5" />
       <path d="M7 7h1M7 10h1M7 13h1M11 7h1M11 10h1M11 13h1M13 17v-3.5h3.5V17" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+    </svg>
+  )
+}
+function ChartIcon({ className }) {
+  return (
+    <svg viewBox="0 0 20 20" fill="none" className={className}>
+      <path d="M3 17h14M4 14l4-5 3 3 5-7" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   )
 }

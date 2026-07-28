@@ -4,6 +4,7 @@ import Overview from "./views/Overview.jsx"
 import Patients from "./views/Patients.jsx"
 import Microgrid from "./views/Microgrid.jsx"
 import Departments from "./views/Departments.jsx"
+import Analytics from "./views/Analytics.jsx"
 import Alerts from "./views/Alerts.jsx"
 
 export default function App() {
@@ -14,6 +15,7 @@ export default function App() {
         <Route path="/patients"    element={<Patients />} />
         <Route path="/microgrid"   element={<Microgrid />} />
         <Route path="/departments" element={<Departments />} />
+        <Route path="/analytics"   element={<Analytics />} />
         <Route path="/alerts"      element={<Alerts />} />
         {/* Catch-all: redirect unknown paths to overview */}
         <Route path="*"            element={<Navigate to="/" replace />} />
