@@ -112,34 +112,34 @@ export default function Analytics() {
           {/* Summary Stats Cards */}
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 md:gap-4">
             <StatCard
-              title="Total Saved Records"
+              title="Total Records"
               value={statsLoading ? '...' : (stats?.total_records ?? 0).toLocaleString()}
-              subtitle="Database entries"
+              subtitle="Simulation snapshots"
             />
             <StatCard
-              title="Avg Hospital Load"
+              title="Average Hospital Load"
               value={statsLoading ? '...' : stats?.avg_hospital_load_kw != null ? `${stats.avg_hospital_load_kw} kW` : 'N/A'}
-              subtitle="Historical average"
+              subtitle="Across selected period"
             />
             <StatCard
-              title="Avg Renewable Gen"
+              title="Average Renewable Generation"
               value={statsLoading ? '...' : stats?.avg_renewable_generation_kw != null ? `${stats.avg_renewable_generation_kw} kW` : 'N/A'}
-              subtitle="Solar + Wind avg"
+              subtitle="Solar + Wind Output"
             />
             <StatCard
-              title="Avg Battery SOC"
+              title="Average Battery SOC"
               value={statsLoading ? '...' : stats?.avg_battery_soc_percent != null ? `${stats.avg_battery_soc_percent}%` : 'N/A'}
-              subtitle="Battery state"
+              subtitle="Battery Charge Level"
             />
             <StatCard
-              title="Oldest Record"
+              title="History Start"
               value={statsLoading ? '...' : formatDateLabel(stats?.oldest_record)}
-              subtitle="History start"
+              subtitle="First Recorded Snapshot"
             />
             <StatCard
-              title="Newest Record"
+              title="Latest Record"
               value={statsLoading ? '...' : formatDateLabel(stats?.newest_record)}
-              subtitle="Latest snapshot"
+              subtitle="Most Recent Snapshot"
             />
           </div>
 
