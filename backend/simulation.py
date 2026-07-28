@@ -1,22 +1,22 @@
 """
 VITAL-OS — Renewable Energy Simulation Engine
-Milestone 2: Hospital microgrid simulator.
+Milestone 5: Realistic Synthetic Data Engine.
 
-Models solar generation, wind generation, a battery storage system,
-department-level hospital load, and grid status — advancing in
-15-minute timesteps. Pure simulation logic, no FastAPI/DB coupling.
-
-Dependencies: numpy, pandas, datetime, random, math
+Models solar generation, wind generation, battery storage system,
+hospital department power loads, grid status, and equipment failure events
+advancing in 15-minute timesteps driven by dataset_manager profiles.
 """
 
 import math
 import random
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
-from typing import Optional
+from typing import Optional, List, Dict
 
 import numpy as np
 import pandas as pd
+
+from dataset_manager import get_dataset_manager
 
 
 # ---------------------------------------------------------------------------
@@ -28,67 +28,34 @@ INTERVALS_PER_DAY = (24 * 60) // INTERVAL_MINUTES  # 96
 
 
 # ---------------------------------------------------------------------------
-# Solar Power Model
+# Solar Power Model (Data-Driven)
 # ---------------------------------------------------------------------------
 
 class SolarArray:
     """
-    Models a rooftop solar PV array.
-
-    Output follows a bell-shaped curve between sunrise and sunset
-    (zero at night), modulated by random cloud cover events that
-    cause realistic dips and recoveries rather than pure noise.
+    Models a rooftop solar PV array driven by historical solar irradiance datasets (GHI W/m²).
+    Captures sunrise/sunset, cloud cover, and seasonal daylight shifts naturally.
     """
 
     def __init__(
         self,
         peak_capacity_kw: float = 150.0,
-        sunrise_hour: float = 6.0,
-        sunset_hour: float = 18.5,
     ):
         self.peak_capacity_kw = peak_capacity_kw
-        self.sunrise_hour = sunrise_hour
-        self.sunset_hour = sunset_hour
 
-        # Cloud cover is a slowly-varying value in [0, 1] (0 = clear, 1 = fully overcast).
-        # We evolve it with a random walk so cover doesn't jump erratically
-        # between consecutive 15-min steps.
-        self._cloud_cover = random.uniform(0.0, 0.3)
+    def generate(self, timestamp: datetime, solar_inverter_mult: float = 1.0) -> float:
+        """Return solar output in kW for the given timestamp using local irradiance data."""
+        solar_info = get_dataset_manager().get_solar_irradiance(timestamp)
+        ghi = solar_info["ghi_w_m2"]
 
-    def _daylight_fraction(self, hour_of_day: float) -> float:
-        """Bell-shaped output curve across the daylight window, 0 outside it."""
-        if hour_of_day <= self.sunrise_hour or hour_of_day >= self.sunset_hour:
-            return 0.0
-        day_length = self.sunset_hour - self.sunrise_hour
-        # Map daylight window to 0..pi so sin() gives a smooth rise/peak/fall
-        x = (hour_of_day - self.sunrise_hour) / day_length * math.pi
-        return math.sin(x)  # 0 at edges, 1 at solar noon
-
-    def _step_cloud_cover(self):
-        """Evolve cloud cover with a bounded random walk (realistic drift)."""
-        drift = random.uniform(-0.08, 0.08)
-        self._cloud_cover = min(1.0, max(0.0, self._cloud_cover + drift))
-        # Occasionally a cloud bank rolls in/out abruptly
-        if random.random() < 0.05:
-            self._cloud_cover = min(1.0, max(0.0, self._cloud_cover + random.uniform(-0.4, 0.4)))
-
-    def generate(self, timestamp: datetime) -> float:
-        """Return solar output in kW for the given timestamp."""
-        self._step_cloud_cover()
-
-        hour_of_day = timestamp.hour + timestamp.minute / 60.0
-        base_fraction = self._daylight_fraction(hour_of_day)
-
-        if base_fraction <= 0.0:
+        if ghi <= 0.0:
             return 0.0
 
-        # Cloud cover attenuates output; clouds never fully zero out diffuse light.
-        cloud_attenuation = 1.0 - (self._cloud_cover * 0.75)
+        # Convert GHI (W/m², where 1000 W/m² = STC peak rating) to power output (kW)
+        # Apply random sensor jitter + inverter health multiplier
+        sensor_noise = random.uniform(0.97, 1.03)
+        output_kw = (ghi / 1000.0) * self.peak_capacity_kw * solar_inverter_mult * sensor_noise
 
-        # Small instantaneous sensor noise on top of the smooth curve
-        noise = random.uniform(0.97, 1.03)
-
-        output_kw = self.peak_capacity_kw * base_fraction * cloud_attenuation * noise
         return round(max(0.0, output_kw), 2)
 
 
@@ -98,20 +65,16 @@ class SolarArray:
 
 class WindTurbine:
     """
-    Models a small hospital-site wind turbine.
-
-    Wind speed is simulated as a mean-reverting random walk (so gusts
-    settle back toward a baseline), then converted to power output via
-    a simplified turbine power curve: cubic ramp-up between cut-in and
-    rated speed, flat rated output, cutout above safety threshold.
+    Models a hospital-site wind turbine with a mean-reverting wind speed random walk
+    and cubic power curve.
     """
 
     def __init__(
         self,
         rated_capacity_kw: float = 60.0,
-        cut_in_speed: float = 3.0,   # m/s, below this: no generation
-        rated_speed: float = 12.0,   # m/s, at/above this: full rated output
-        cut_out_speed: float = 25.0,  # m/s, above this: turbine shuts down for safety
+        cut_in_speed: float = 3.0,    # m/s
+        rated_speed: float = 12.0,    # m/s
+        cut_out_speed: float = 25.0,  # m/s
         baseline_wind_speed: float = 7.0,
     ):
         self.rated_capacity_kw = rated_capacity_kw
@@ -122,13 +85,10 @@ class WindTurbine:
         self._wind_speed = baseline_wind_speed
 
     def _step_wind_speed(self, hour_of_day: float):
-        """Mean-reverting random walk with a mild diurnal pattern (windier afternoons)."""
         diurnal_bias = 1.5 * math.sin((hour_of_day - 6) / 24 * 2 * math.pi)
         target = self.baseline_wind_speed + diurnal_bias
-
         reversion = (target - self._wind_speed) * 0.15
-        gust = random.gauss(0, 1.0)  # gaussian gust noise
-
+        gust = random.gauss(0, 1.0)
         self._wind_speed = max(0.0, self._wind_speed + reversion + gust)
 
     def _power_curve(self, speed: float) -> float:
@@ -136,15 +96,13 @@ class WindTurbine:
             return 0.0
         if speed >= self.rated_speed:
             return self.rated_capacity_kw
-        # Cubic ramp between cut-in and rated speed (typical turbine power curve shape)
         fraction = ((speed - self.cut_in_speed) / (self.rated_speed - self.cut_in_speed)) ** 3
         return self.rated_capacity_kw * fraction
 
-    def generate(self, timestamp: datetime) -> float:
-        """Return wind output in kW for the given timestamp."""
+    def generate(self, timestamp: datetime, wind_mult: float = 1.0) -> float:
         hour_of_day = timestamp.hour + timestamp.minute / 60.0
         self._step_wind_speed(hour_of_day)
-        output_kw = self._power_curve(self._wind_speed)
+        output_kw = self._power_curve(self._wind_speed) * wind_mult
         return round(max(0.0, output_kw), 2)
 
     @property
@@ -158,117 +116,102 @@ class WindTurbine:
 
 class BatterySystem:
     """
-    Models a hospital battery energy storage system (BESS).
-
-    Tracks state of charge (SOC %) and charges from surplus renewable
-    generation or discharges to cover shortfalls, respecting capacity
-    limits, max charge/discharge power, and round-trip efficiency.
+    Models a Lithium-ion BESS with round-trip efficiency and SoC management.
     """
 
     def __init__(
         self,
-        capacity_kwh: float = 400.0,
-        initial_soc_percent: float = 60.0,
-        max_charge_kw: float = 100.0,
-        max_discharge_kw: float = 100.0,
-        round_trip_efficiency: float = 0.92,
-        min_soc_percent: float = 10.0,   # reserve floor, protects battery health
-        max_soc_percent: float = 100.0,
+        capacity_kwh: float = 300.0,
+        max_power_kw: float = 75.0,
+        initial_soc_percent: float = 50.0,
+        min_soc_percent: float = 10.0,
+        max_soc_percent: float = 95.0,
+        charge_efficiency: float = 0.95,
+        discharge_efficiency: float = 0.95,
     ):
         self.capacity_kwh = capacity_kwh
-        self.soc_percent = initial_soc_percent
-        self.max_charge_kw = max_charge_kw
-        self.max_discharge_kw = max_discharge_kw
-        self.round_trip_efficiency = round_trip_efficiency
+        self.max_power_kw = max_power_kw
         self.min_soc_percent = min_soc_percent
         self.max_soc_percent = max_soc_percent
+        self.charge_efficiency = charge_efficiency
+        self.discharge_efficiency = discharge_efficiency
+
+        self.soc_kwh = (initial_soc_percent / 100.0) * capacity_kwh
+        self.soc_kwh = max(self.min_kwh, min(self.max_kwh, self.soc_kwh))
 
     @property
-    def energy_stored_kwh(self) -> float:
-        return self.capacity_kwh * (self.soc_percent / 100.0)
+    def min_kwh(self) -> float:
+        return (self.min_soc_percent / 100.0) * self.capacity_kwh
 
-    def _interval_hours(self) -> float:
-        return INTERVAL_MINUTES / 60.0
+    @property
+    def max_kwh(self) -> float:
+        return (self.max_soc_percent / 100.0) * self.capacity_kwh
 
-    def step(self, net_surplus_kw: float) -> dict:
-        """
-        Apply one simulation interval's worth of charge/discharge.
+    @property
+    def soc_percent(self) -> float:
+        return round((self.soc_kwh / self.capacity_kwh) * 100.0, 2)
 
-        net_surplus_kw > 0  -> excess renewable generation available to charge battery
-        net_surplus_kw < 0  -> generation shortfall, battery discharges to help cover it
-
-        Returns a dict describing what the battery actually did, since
-        physical limits (capacity, power rating, reserve floor) may mean
-        the battery can't fully absorb/cover the requested amount. The
-        leftover (uncharged surplus or unmet shortfall) is the caller's
-        responsibility to route to/from the grid.
-        """
-        hours = self._interval_hours()
-        result = {
-            "action": "idle",
-            "power_kw": 0.0,
-            "soc_percent": self.soc_percent,
-            "grid_export_kw": 0.0,     # surplus that couldn't be stored
-            "grid_import_kw": 0.0,     # shortfall the battery couldn't cover
-        }
+    def step(self, net_surplus_kw: float, power_limit_mult: float = 1.0) -> dict:
+        effective_max_power = self.max_power_kw * power_limit_mult
+        max_energy_per_interval_kwh = effective_max_power * (INTERVAL_MINUTES / 60.0)
+        result = {"action": "idle", "power_kw": 0.0, "soc_percent": self.soc_percent, "grid_import_kw": 0.0, "grid_export_kw": 0.0}
 
         if net_surplus_kw > 0:
-            # Charging: limited by charger power rating and remaining headroom
-            charge_power_kw = min(net_surplus_kw, self.max_charge_kw)
-            headroom_kwh = (self.max_soc_percent - self.soc_percent) / 100.0 * self.capacity_kwh
-            max_chargeable_kw = headroom_kwh / hours if hours > 0 else 0.0
-            actual_charge_kw = min(charge_power_kw, max_chargeable_kw)
+            room_kwh = self.max_kwh - self.soc_kwh
+            if room_kwh <= 0.001:
+                result["grid_export_kw"] = round(net_surplus_kw, 2)
+                return result
 
-            # Efficiency loss happens going into storage
-            energy_into_battery_kwh = actual_charge_kw * hours * math.sqrt(self.round_trip_efficiency)
-            self.soc_percent += (energy_into_battery_kwh / self.capacity_kwh) * 100.0
-            self.soc_percent = min(self.max_soc_percent, self.soc_percent)
+            max_charge_from_power_kwh = max_energy_per_interval_kwh * self.charge_efficiency
+            energy_to_store_kwh = min(room_kwh, max_charge_from_power_kwh)
+            ac_power_used_kw = energy_to_store_kwh / (self.charge_efficiency * (INTERVAL_MINUTES / 60.0))
+            ac_power_used_kw = min(net_surplus_kw, ac_power_used_kw)
 
-            leftover_surplus_kw = max(0.0, net_surplus_kw - actual_charge_kw)
+            actual_stored_kwh = ac_power_used_kw * self.charge_efficiency * (INTERVAL_MINUTES / 60.0)
+            self.soc_kwh = min(self.max_kwh, self.soc_kwh + actual_stored_kwh)
+            unused_surplus_kw = net_surplus_kw - ac_power_used_kw
 
             result.update({
-                "action": "charging" if actual_charge_kw > 0 else "idle",
-                "power_kw": round(actual_charge_kw, 2),
+                "action": "charging",
+                "power_kw": round(ac_power_used_kw, 2),
                 "soc_percent": round(self.soc_percent, 2),
-                "grid_export_kw": round(leftover_surplus_kw, 2),
+                "grid_export_kw": round(max(0.0, unused_surplus_kw), 2),
             })
-
         elif net_surplus_kw < 0:
-            shortfall_kw = -net_surplus_kw
-            discharge_power_kw = min(shortfall_kw, self.max_discharge_kw)
-            available_kwh = (self.soc_percent - self.min_soc_percent) / 100.0 * self.capacity_kwh
-            max_dischargeable_kw = max(0.0, available_kwh / hours) if hours > 0 else 0.0
-            actual_discharge_kw = min(discharge_power_kw, max_dischargeable_kw)
+            shortfall_kw = abs(net_surplus_kw)
+            available_kwh = self.soc_kwh - self.min_kwh
+            if available_kwh <= 0.001:
+                result["grid_import_kw"] = round(shortfall_kw, 2)
+                return result
 
-            # Efficiency loss happens coming out of storage
-            energy_drawn_from_battery_kwh = actual_discharge_kw * hours / math.sqrt(self.round_trip_efficiency)
-            self.soc_percent -= (energy_drawn_from_battery_kwh / self.capacity_kwh) * 100.0
-            self.soc_percent = max(self.min_soc_percent, self.soc_percent)
+            max_dc_discharge_kwh = max_energy_per_interval_kwh
+            ac_energy_needed_kwh = shortfall_kw * (INTERVAL_MINUTES / 60.0)
+            dc_energy_needed_kwh = ac_energy_needed_kwh / self.discharge_efficiency
 
-            unmet_shortfall_kw = max(0.0, shortfall_kw - actual_discharge_kw)
+            dc_energy_drawn_kwh = min(available_kwh, max_dc_discharge_kwh, dc_energy_needed_kwh)
+            self.soc_kwh = max(self.min_kwh, self.soc_kwh - dc_energy_drawn_kwh)
+
+            ac_power_delivered_kw = (dc_energy_drawn_kwh * self.discharge_efficiency) / (INTERVAL_MINUTES / 60.0)
+            unmet_shortfall_kw = shortfall_kw - ac_power_delivered_kw
 
             result.update({
-                "action": "discharging" if actual_discharge_kw > 0 else "idle",
-                "power_kw": round(actual_discharge_kw, 2),
+                "action": "discharging" if ac_power_delivered_kw > 0 else "idle",
+                "power_kw": round(ac_power_delivered_kw, 2),
                 "soc_percent": round(self.soc_percent, 2),
-                "grid_import_kw": round(unmet_shortfall_kw, 2),
+                "grid_import_kw": round(max(0.0, unmet_shortfall_kw), 2),
             })
 
         return result
 
 
 # ---------------------------------------------------------------------------
-# Hospital Load Model
+# Hospital Load Model (Data-Driven)
 # ---------------------------------------------------------------------------
 
 class HospitalLoad:
     """
-    Models power consumption (kW) across hospital departments.
-
-    Each department has a base load plus a realistic daily pattern and
-    random fluctuation. Critical departments (ICU, OT, ED, Oxygen Plant)
-    stay relatively stable (life-safety loads run near-constant), while
-    General Ward, HVAC, and Lighting vary more with time of day.
+    Models department-level hospital electricity consumption driven by local
+    DOE-aligned hospital profiles and department weighting factors.
     """
 
     DEPARTMENTS = [
@@ -282,65 +225,49 @@ class HospitalLoad:
     ]
 
     def __init__(self):
-        # (base_kw, daily_variation_kw, noise_kw) per department
-        self._profiles = {
-            "ICU": dict(base_kw=45.0, variation_kw=5.0, noise_kw=1.5),
-            "Operation_Theatre": dict(base_kw=35.0, variation_kw=15.0, noise_kw=2.0),
-            "Emergency_Department": dict(base_kw=30.0, variation_kw=10.0, noise_kw=2.0),
-            "Oxygen_Plant": dict(base_kw=25.0, variation_kw=3.0, noise_kw=1.0),
-            "General_Ward": dict(base_kw=20.0, variation_kw=8.0, noise_kw=1.5),
-            "HVAC": dict(base_kw=40.0, variation_kw=20.0, noise_kw=3.0),
-            "Lighting": dict(base_kw=10.0, variation_kw=12.0, noise_kw=1.0),
+        self._base_profiles = {
+            "ICU": dict(base_kw=45.0, variation_kw=5.0, noise_kw=1.0),
+            "Operation_Theatre": dict(base_kw=35.0, variation_kw=20.0, noise_kw=1.5),
+            "Emergency_Department": dict(base_kw=30.0, variation_kw=12.0, noise_kw=1.5),
+            "Oxygen_Plant": dict(base_kw=25.0, variation_kw=3.0, noise_kw=0.8),
+            "General_Ward": dict(base_kw=20.0, variation_kw=8.0, noise_kw=1.0),
+            "HVAC": dict(base_kw=40.0, variation_kw=25.0, noise_kw=2.0),
+            "Lighting": dict(base_kw=10.0, variation_kw=12.0, noise_kw=0.8),
         }
 
-    def _daily_pattern(self, dept: str, hour_of_day: float) -> float:
-        """
-        Returns a multiplier-like additive component in [0, 1] representing
-        how "busy"/active a department's variable load is at this hour.
-        Different departments peak at different times of day.
-        """
-        if dept == "Operation_Theatre":
-            # Elective surgeries cluster in daytime hours, quiet at night
-            return max(0.0, math.sin((hour_of_day - 7) / 14 * math.pi)) if 7 <= hour_of_day <= 21 else 0.05
+    def step(self, timestamp: datetime, failure_adjustments: Optional[dict] = None) -> dict:
+        """Return current kW draw per department and total for timestamp."""
+        load_info = get_dataset_manager().get_hospital_load_profile(timestamp)
+        mult = load_info["load_multiplier"]
+        hvac_f = load_info["hvac_factor"]
+        ot_f = load_info["ot_factor"]
+        ed_f = load_info["ed_factor"]
+        icu_f = load_info["icu_factor"]
 
-        if dept == "Emergency_Department":
-            # ED has a baseline plus an evening/night bump (common real-world pattern)
-            evening_bump = 0.6 * math.exp(-((hour_of_day - 20) ** 2) / 10)
-            midday_bump = 0.3 * math.exp(-((hour_of_day - 13) ** 2) / 10)
-            return min(1.0, 0.3 + evening_bump + midday_bump)
-
-        if dept == "General_Ward":
-            # Visiting hours / daytime activity raises ward load
-            return max(0.2, math.sin((hour_of_day - 8) / 14 * math.pi)) if 8 <= hour_of_day <= 20 else 0.2
-
-        if dept == "HVAC":
-            # Cooling load peaks in the afternoon heat
-            return max(0.15, math.sin((hour_of_day - 6) / 16 * math.pi))
-
-        if dept == "Lighting":
-            # On during dark hours, low during daylight
-            if hour_of_day <= 6 or hour_of_day >= 18:
-                return 1.0
-            elif 6 < hour_of_day < 8 or 16 < hour_of_day < 18:
-                return 0.5
-            else:
-                return 0.1
-
-        # ICU and Oxygen Plant: near-constant life-safety loads
-        return 0.5
-
-    def step(self, timestamp: datetime) -> dict:
-        """Return current kW draw per department, plus total, for this timestamp."""
-        hour_of_day = timestamp.hour + timestamp.minute / 60.0
+        adjustments = failure_adjustments or {}
         loads = {}
 
-        for dept, profile in self._profiles.items():
-            pattern_factor = self._daily_pattern(dept, hour_of_day)
-            variable_component = profile["variation_kw"] * pattern_factor
+        for dept, profile in self._base_profiles.items():
+            base = profile["base_kw"]
+            var = profile["variation_kw"]
             noise = random.gauss(0, profile["noise_kw"])
 
-            load_kw = profile["base_kw"] + variable_component + noise
-            loads[dept] = round(max(0.0, load_kw), 2)
+            if dept == "HVAC":
+                dept_load = (base + var * hvac_f) * mult + noise
+            elif dept == "Operation_Theatre":
+                dept_load = (base + var * ot_f) * mult + noise
+            elif dept == "Emergency_Department":
+                dept_load = (base + var * ed_f) * mult + noise
+            elif dept == "ICU":
+                dept_load = (base * icu_f) + (var * 0.3) + noise
+            else:
+                dept_load = (base + var * 0.5) * mult + noise
+
+            # Add equipment failure load adjustment if active
+            if dept in adjustments:
+                dept_load += adjustments[dept]
+
+            loads[dept] = round(max(0.0, dept_load), 2)
 
         loads["Total"] = round(sum(loads.values()), 2)
         return loads
@@ -351,14 +278,7 @@ class HospitalLoad:
 # ---------------------------------------------------------------------------
 
 class GridStatus:
-    """
-    Models utility grid connection status: NORMAL, OUTAGE, RESTORED.
-
-    Outages are randomly triggered (low probability per interval) and
-    last a random number of intervals. RESTORED is a one-interval
-    transitional state right after an outage ends, before returning
-    to NORMAL — useful for the frontend/AI layer to detect "just came back".
-    """
+    """Models utility grid connection status: NORMAL, OUTAGE, RESTORED."""
 
     NORMAL = "NORMAL"
     OUTAGE = "OUTAGE"
@@ -366,9 +286,9 @@ class GridStatus:
 
     def __init__(
         self,
-        outage_probability_per_interval: float = 0.003,  # ~0.3% chance per 15 min
-        min_outage_intervals: int = 2,    # 30 min
-        max_outage_intervals: int = 16,   # 4 hours
+        outage_probability_per_interval: float = 0.003,
+        min_outage_intervals: int = 2,
+        max_outage_intervals: int = 16,
     ):
         self.status = self.NORMAL
         self.outage_probability_per_interval = outage_probability_per_interval
@@ -378,7 +298,6 @@ class GridStatus:
         self._was_in_outage_last_step = False
 
     def step(self) -> str:
-        """Advance grid status by one interval and return the current status."""
         if self.status == self.OUTAGE:
             self._intervals_remaining_in_outage -= 1
             self._was_in_outage_last_step = True
@@ -387,12 +306,10 @@ class GridStatus:
             return self.status
 
         if self._was_in_outage_last_step:
-            # We were RESTORED last step; settle back to NORMAL now
             self.status = self.NORMAL
             self._was_in_outage_last_step = False
             return self.status
 
-        # Normal operation: small random chance a new outage begins
         if random.random() < self.outage_probability_per_interval:
             self.status = self.OUTAGE
             self._intervals_remaining_in_outage = random.randint(
@@ -405,7 +322,70 @@ class GridStatus:
 
 
 # ---------------------------------------------------------------------------
-# Microgrid Simulator (orchestrates all subsystems)
+# Equipment Failure Events Engine
+# ---------------------------------------------------------------------------
+
+class EquipmentFailureEngine:
+    """
+    Models operational events (Chiller Failure, Oxygen Concentrator Failure,
+    HVAC Overload, Solar Inverter Failure, Battery Thermal Throttling,
+    Wind Turbine Maintenance, Emergency Surgery Surge).
+    """
+
+    def __init__(self, failure_probability_per_interval: float = 0.004):
+        self.failure_probability = failure_probability_per_interval
+        self.active_events: Dict[str, int] = {}
+
+    def step(self) -> dict:
+        # Decrement remaining intervals for active events
+        to_remove = []
+        for name in list(self.active_events.keys()):
+            self.active_events[name] -= 1
+            if self.active_events[name] <= 0:
+                to_remove.append(name)
+        for name in to_remove:
+            del self.active_events[name]
+
+        # Trigger new events
+        if random.random() < self.failure_probability:
+            events_pool = [
+                ("Chiller Failure", 16),
+                ("Oxygen Concentrator Failure", 12),
+                ("HVAC Overload", 8),
+                ("Solar Inverter Failure", 24),
+                ("Battery Thermal Throttling", 16),
+                ("Wind Turbine Maintenance", 24),
+                ("Emergency Surgery Surge", 8),
+            ]
+            chosen_name, duration = random.choice(events_pool)
+            if chosen_name not in self.active_events:
+                self.active_events[chosen_name] = duration
+
+        # Compute impacts
+        solar_mult = 0.2 if "Solar Inverter Failure" in self.active_events else 1.0
+        wind_mult = 0.0 if "Wind Turbine Maintenance" in self.active_events else 1.0
+        battery_power_mult = 0.5 if "Battery Thermal Throttling" in self.active_events else 1.0
+
+        dept_adjustments = {}
+        if "Chiller Failure" in self.active_events or "HVAC Overload" in self.active_events:
+            dept_adjustments["HVAC"] = dept_adjustments.get("HVAC", 0.0) + 35.0
+        if "Oxygen Concentrator Failure" in self.active_events:
+            dept_adjustments["Oxygen_Plant"] = dept_adjustments.get("Oxygen_Plant", 0.0) + 15.0
+        if "Emergency Surgery Surge" in self.active_events:
+            dept_adjustments["Operation_Theatre"] = dept_adjustments.get("Operation_Theatre", 0.0) + 25.0
+            dept_adjustments["ICU"] = dept_adjustments.get("ICU", 0.0) + 15.0
+
+        return {
+            "active_events": list(self.active_events.keys()),
+            "solar_mult": solar_mult,
+            "wind_mult": wind_mult,
+            "battery_power_mult": battery_power_mult,
+            "dept_adjustments": dept_adjustments,
+        }
+
+
+# ---------------------------------------------------------------------------
+# Microgrid Simulator
 # ---------------------------------------------------------------------------
 
 @dataclass
@@ -424,10 +404,11 @@ class SimulationSnapshot:
     grid_status: str
     grid_import_kw: float
     grid_export_kw: float
+    season: str = "Summer"
+    active_events: list = field(default_factory=list)
     net_balance_kw: float = field(init=False)
 
     def __post_init__(self):
-        # Positive = surplus generation, negative = deficit covered by grid/battery shortfall
         self.net_balance_kw = round(self.total_generation_kw - self.total_load_kw, 2)
 
     def to_dict(self) -> dict:
@@ -445,6 +426,8 @@ class SimulationSnapshot:
             "grid_import_kw": self.grid_import_kw,
             "grid_export_kw": self.grid_export_kw,
             "net_balance_kw": self.net_balance_kw,
+            "season": self.season,
+            "active_events": self.active_events,
         }
         d.update({f"load_{k}": v for k, v in self.department_loads.items()})
         return d
@@ -452,13 +435,8 @@ class SimulationSnapshot:
 
 class MicrogridSimulator:
     """
-    Top-level simulator tying together solar, wind, battery, hospital load,
-    and grid status into a single advancing timeline.
-
-    Usage:
-        sim = MicrogridSimulator(start_time=datetime(2026, 6, 30, 0, 0))
-        snapshot = sim.step()              # advance one 15-min interval
-        df = sim.run(intervals=96)         # run a full day, get a DataFrame
+    Top-level data-driven simulator orchestrating solar, wind, battery, load,
+    grid, and equipment failure events.
     """
 
     def __init__(
@@ -484,32 +462,42 @@ class MicrogridSimulator:
         self.battery = battery or BatterySystem()
         self.load = load or HospitalLoad()
         self.grid = grid or GridStatus()
+        self.equipment_engine = EquipmentFailureEngine()
 
-        self.history: list[SimulationSnapshot] = []
+        self.history: List[SimulationSnapshot] = []
 
     def step(self) -> SimulationSnapshot:
-        """Advance the simulation by one 15-minute interval and return the snapshot."""
-        solar_kw = self.solar.generate(self.current_time)
-        wind_kw = self.wind.generate(self.current_time)
+        """Advance simulation by one 15-minute interval and return snapshot."""
+        # 1. Failure events engine
+        failure_info = self.equipment_engine.step()
+
+        # 2. Solar & Wind generation
+        solar_kw = self.solar.generate(self.current_time, failure_info["solar_mult"])
+        wind_kw = self.wind.generate(self.current_time, failure_info["wind_mult"])
         total_generation_kw = round(solar_kw + wind_kw, 2)
 
-        dept_loads = self.load.step(self.current_time)
+        # 3. Hospital loads
+        dept_loads = self.load.step(self.current_time, failure_info["dept_adjustments"])
         total_load_kw = dept_loads["Total"]
 
+        # 4. Grid status
         grid_status = self.grid.step()
 
+        # 5. Battery storage management
         net_surplus_kw = total_generation_kw - total_load_kw
-        battery_result = self.battery.step(net_surplus_kw)
+        battery_result = self.battery.step(net_surplus_kw, failure_info["battery_power_mult"])
 
-        # Determine actual grid import/export after battery has done what it can.
-        # During an OUTAGE, the grid cannot supply or absorb power at all —
-        # any unmet shortfall becomes a load-shed risk, any unstored surplus is wasted.
+        # 6. Grid import / export
         if grid_status == GridStatus.OUTAGE:
             grid_import_kw = 0.0
             grid_export_kw = 0.0
         else:
             grid_import_kw = battery_result["grid_import_kw"]
             grid_export_kw = battery_result["grid_export_kw"]
+
+        # Determine season info
+        solar_info = get_dataset_manager().get_solar_irradiance(self.current_time)
+        season = solar_info.get("season", "Summer")
 
         snapshot = SimulationSnapshot(
             timestamp=self.current_time,
@@ -525,6 +513,8 @@ class MicrogridSimulator:
             grid_status=grid_status,
             grid_import_kw=grid_import_kw,
             grid_export_kw=grid_export_kw,
+            season=season,
+            active_events=failure_info["active_events"],
         )
 
         self.history.append(snapshot)
@@ -538,39 +528,9 @@ class MicrogridSimulator:
         return self.history_to_dataframe()
 
     def history_to_dataframe(self) -> pd.DataFrame:
-        """Convert accumulated history into a pandas DataFrame (one row per interval)."""
         if not self.history:
             return pd.DataFrame()
         return pd.DataFrame([s.to_dict() for s in self.history])
 
     def reset_history(self):
-        """Clear accumulated history without resetting subsystem state (SOC, wind, etc.)."""
         self.history = []
-
-
-# ---------------------------------------------------------------------------
-# Manual smoke test (only runs when this file is executed directly)
-# ---------------------------------------------------------------------------
-
-if __name__ == "__main__":
-    sim = MicrogridSimulator(
-        start_time=datetime(2026, 6, 30, 0, 0),
-        random_seed=42,
-    )
-    df = sim.run(intervals=INTERVALS_PER_DAY)  # simulate one full day
-
-    pd.set_option("display.max_columns", None)
-    pd.set_option("display.width", 200)
-
-    print(df[[
-        "timestamp", "solar_kw", "wind_kw", "total_generation_kw",
-        "total_load_kw", "battery_soc_percent", "battery_action",
-        "grid_status", "net_balance_kw"
-    ]].iloc[::8])  # print every 2 hours for a readable preview
-
-    print("\nDay summary:")
-    print(f"  Total solar generation: {df['solar_kw'].sum() / 4:.1f} kWh")
-    print(f"  Total wind generation:  {df['wind_kw'].sum() / 4:.1f} kWh")
-    print(f"  Total hospital load:    {df['total_load_kw'].sum() / 4:.1f} kWh")
-    print(f"  Battery SOC range:      {df['battery_soc_percent'].min():.1f}% - {df['battery_soc_percent'].max():.1f}%")
-    print(f"  Outage intervals:       {(df['grid_status'] == 'OUTAGE').sum()} / {len(df)}")

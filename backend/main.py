@@ -169,6 +169,59 @@ def evaluate_and_create_alerts(db: Session, snapshot: dict):
             "source": "RENEWABLE",
         })
 
+    # 5. Active Equipment Failure Events Engine
+    active_events = snapshot.get("active_events", [])
+    for event_name in active_events:
+        if event_name == "Chiller Failure":
+            potential_alerts.append({
+                "severity": "WARNING",
+                "title": "Hospital Chiller Unit Failure",
+                "message": "Chiller failure detected in HVAC subsystem; secondary cooling units active (+35 kW load surge).",
+                "source": "SYSTEM",
+            })
+        elif event_name == "Oxygen Concentrator Failure":
+            potential_alerts.append({
+                "severity": "CRITICAL",
+                "title": "Oxygen Concentrator Fault",
+                "message": "Primary oxygen concentrator failure detected; switching to auxiliary life-support power.",
+                "source": "SYSTEM",
+            })
+        elif event_name == "HVAC Overload":
+            potential_alerts.append({
+                "severity": "WARNING",
+                "title": "HVAC System Thermal Overload",
+                "message": "Extreme cooling demand causing HVAC system thermal overload (+35 kW load bump).",
+                "source": "SYSTEM",
+            })
+        elif event_name == "Solar Inverter Failure":
+            potential_alerts.append({
+                "severity": "WARNING",
+                "title": "Solar PV Inverter Fault",
+                "message": "Solar PV inverter trip detected; solar generation throttled to 20% capacity.",
+                "source": "RENEWABLE",
+            })
+        elif event_name == "Battery Thermal Throttling":
+            potential_alerts.append({
+                "severity": "WARNING",
+                "title": "Battery BESS Thermal Throttling",
+                "message": "BESS high temperature warning; battery discharge power capped at 50%.",
+                "source": "BATTERY",
+            })
+        elif event_name == "Wind Turbine Maintenance":
+            potential_alerts.append({
+                "severity": "INFO",
+                "title": "Wind Turbine Safety Maintenance",
+                "message": "Wind turbine offline for scheduled safety maintenance.",
+                "source": "RENEWABLE",
+            })
+        elif event_name == "Emergency Surgery Surge":
+            potential_alerts.append({
+                "severity": "INFO",
+                "title": "Emergency Surgery Surge",
+                "message": "Unscheduled emergency surgery in progress; OT and ICU clinical power draw elevated.",
+                "source": "LOAD_FORECAST",
+            })
+
     # Deduplication and insertion
     for item in potential_alerts:
         existing = db.query(Alert).filter(
