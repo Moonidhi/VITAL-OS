@@ -69,3 +69,4 @@ Thumbs.db
 # AI / IDE transient state
 .antigravity/
 .gemini/
+backend/.sim_cache/

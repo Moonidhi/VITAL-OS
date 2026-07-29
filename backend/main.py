@@ -675,9 +675,16 @@ def ai_status():
     return {
         "trained": model.trained,
         "training_samples": model.training_samples,
+        "train_rmse": round(model.train_rmse, 4),
+        "val_rmse": round(model.val_rmse, 4),
+        "test_rmse": round(model.test_rmse, 4),
         "rmse": round(model.rmse, 4),
         "model": model.model_name,
         "last_trained": model.last_trained,
+        "feature_importance": model.feature_importance,
+        "top_feature": model.top_feature,
+        "training_data_source": model.training_data_source,
+        "is_pretrained": model.is_pretrained,
     }
 
 
