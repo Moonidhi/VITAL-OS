@@ -19,6 +19,18 @@ from pydantic import BaseModel
 
 from simulation import MicrogridSimulator, INTERVALS_PER_DAY
 from ai_model import get_or_train_model
+from patients_router import router as patients_router
+from patients import PatientEngine
+patient_engine = PatientEngine(db_url="sqlite:///./vital_os.db")
+from microgrid_router import router as microgrid_router
+from microgrid import MicrogridEngine
+microgrid_engine = MicrogridEngine(db_url="sqlite:///./vital_os.db")
+from departments_router import router as departments_router
+from departments import DepartmentEngine
+dept_engine = DepartmentEngine(db_url="sqlite:///./vital_os.db")
+
+
+
 
 
 # ---------------------------------------------------------------------------
@@ -345,6 +357,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.include_router(patients_router)
+app.include_router(microgrid_router)
+app.include_router(departments_router)
+
+
 
 # ---------------------------------------------------------------------------
 # Simulation engine (single shared instance, created at startup)
@@ -414,7 +431,10 @@ def get_current_simulation_snapshot(db: Session = Depends(get_db)):
     Automatically persists snapshot to database.
     """
     if not simulator.history:
-        simulator.step()
+        snapshot = simulator.step()
+        patient_engine.simulate_step(snapshot.to_dict())
+        microgrid_engine.simulate_step(snapshot.to_dict())
+        dept_engine.simulate_step(snapshot.to_dict())
 
     # Save all accumulated history to DB to ensure completeness
     all_snapshots = [s.to_dict() for s in simulator.history]
