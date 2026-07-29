@@ -1,3 +1,5 @@
+import React, { useState, useEffect } from 'react'
+
 const STATUS_CONFIG = {
   NORMAL: {
     label: 'Grid Normal',
@@ -33,19 +35,38 @@ function ZapIcon({ color }) {
   )
 }
 
-export default function GridStatusCard({ status = 'NORMAL', gridImportKw = 0, gridExportKw = 0 }) {
+export default function GridStatusCard({
+  status = 'NORMAL',
+  gridImportKw = 0,
+  gridExportKw = 0,
+  last_outage_duration = null,
+}) {
+  const [flashGreen, setFlashGreen] = useState(false)
   const cfg = STATUS_CONFIG[status] || STATUS_CONFIG.NORMAL
+
+  useEffect(() => {
+    if (status === 'RESTORED') {
+      setFlashGreen(true)
+      const t = setTimeout(() => setFlashGreen(false), 200)
+      return () => clearTimeout(t)
+    }
+  }, [status])
 
   return (
     <div
-      className="rounded-xl border shadow-card p-4 flex flex-col gap-3 h-full transition-colors duration-500"
-      style={{ background: cfg.bg, borderColor: cfg.border }}
+      className={`rounded-xl border shadow-card p-4 flex flex-col gap-3 h-full transition-all duration-500 ${
+        status === 'OUTAGE' ? 'animate-pulse bg-[#FF5C5C0C]' : ''
+      } ${flashGreen ? 'bg-[#3DD68C20]' : ''}`}
+      style={{
+        background: flashGreen ? '#3DD68C20' : cfg.bg,
+        borderColor: cfg.border,
+      }}
     >
       <div className="flex items-center justify-between">
         <span className="text-xs font-medium text-text-muted uppercase tracking-wider">Grid Status</span>
         <div className="flex items-center gap-1.5">
           <span
-            className={`w-2 h-2 rounded-full ${cfg.pulse ? 'animate-pulsedot' : ''}`}
+            className={`w-2.5 h-2.5 rounded-full ${cfg.pulse ? 'animate-pulsedot' : ''}`}
             style={{ background: cfg.color }}
           />
         </div>
@@ -63,17 +84,26 @@ export default function GridStatusCard({ status = 'NORMAL', gridImportKw = 0, gr
             {cfg.label}
           </p>
           <p className="text-[11px] text-text-faint mt-0.5">{cfg.description}</p>
+          {status === 'RESTORED' && last_outage_duration && (
+            <p className="text-[10px] text-[#3DD68C] font-mono mt-0.5">
+              Restored after {last_outage_duration} outage
+            </p>
+          )}
         </div>
       </div>
 
       <div className="border-t border-white/5 pt-2 grid grid-cols-2 gap-3 mt-auto">
         <div>
           <p className="text-[10px] text-text-faint uppercase tracking-wide mb-0.5">Importing</p>
-          <p className="font-mono text-sm text-text-primary">{gridImportKw.toFixed(1)} <span className="text-text-faint text-xs">kW</span></p>
+          <p className="font-mono text-sm text-text-primary">
+            {gridImportKw.toFixed(1)} <span className="text-text-faint text-xs">kW</span>
+          </p>
         </div>
         <div>
           <p className="text-[10px] text-text-faint uppercase tracking-wide mb-0.5">Exporting</p>
-          <p className="font-mono text-sm text-text-primary">{gridExportKw.toFixed(1)} <span className="text-text-faint text-xs">kW</span></p>
+          <p className="font-mono text-sm text-text-primary">
+            {gridExportKw.toFixed(1)} <span className="text-text-faint text-xs">kW</span>
+          </p>
         </div>
       </div>
     </div>

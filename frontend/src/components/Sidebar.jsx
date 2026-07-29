@@ -1,13 +1,13 @@
-import { NavLink } from 'react-router-dom'
+import { NavLink, useLocation } from 'react-router-dom'
 import { usePolledEndpoint } from '../useApi.js'
 
 const NAV_ITEMS = [
-  { label: 'Overview',    to: '/',            icon: GridIcon    },
-  { label: 'Patients',    to: '/patients',    icon: PulseIcon   },
-  { label: 'Microgrid',   to: '/microgrid',   icon: BoltIcon    },
-  { label: 'Departments', to: '/departments', icon: BuildingIcon },
-  { label: 'Analytics',   to: '/analytics',   icon: ChartIcon   },
-  { label: 'Alerts',      to: '/alerts',      icon: BellIcon    },
+  { label: 'Overview', to: '/', icon: GridIcon, desc: 'Overview — Live energy dashboard' },
+  { label: 'Patients', to: '/patients', icon: PulseIcon, desc: 'Patients — Patient management & triage' },
+  { label: 'Microgrid', to: '/microgrid', icon: BoltIcon, desc: 'Microgrid — Live generation & BESS storage' },
+  { label: 'Departments', to: '/departments', icon: BuildingIcon, desc: 'Departments — Wards & energy allocations' },
+  { label: 'Analytics', to: '/analytics', icon: ChartIcon, desc: 'Analytics — Performance & predictive trends' },
+  { label: 'Alerts', to: '/alerts', icon: BellIcon, desc: 'Alerts — System alerts & fault logs' },
 ]
 
 function GridIcon({ className }) {
@@ -58,14 +58,20 @@ function BellIcon({ className }) {
   )
 }
 
+function ActiveDot({ to }) {
+  const { pathname } = useLocation()
+  const isActive = to === '/' ? pathname === '/' : pathname.startsWith(to)
+  return isActive ? <span className="w-1.5 h-1.5 rounded-full bg-battery inline-block shadow-[0_0_8px_#7C9EFF]" /> : null
+}
+
 export default function Sidebar() {
   const { data: alertStats } = usePolledEndpoint('/alerts/stats', 8000)
   const criticalCount = alertStats?.critical_alerts ?? 0
 
   return (
-    <aside className="hidden md:flex w-60 shrink-0 flex-col border-r border-base-border bg-base-surface/60 backdrop-blur-sm">
+    <aside className="hidden md:flex w-60 shrink-0 flex-col border-r border-base-border bg-gradient-to-b from-base-surface to-base backdrop-blur-sm z-40">
       <div className="flex items-center gap-2.5 px-5 h-16 border-b border-base-border">
-        <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-battery to-wind flex items-center justify-center shrink-0">
+        <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-battery to-wind flex items-center justify-center shrink-0 shadow-card">
           <BoltIcon className="w-4.5 h-4.5 text-base" />
         </div>
         <div className="leading-tight">
@@ -75,20 +81,29 @@ export default function Sidebar() {
       </div>
 
       <nav className="flex-1 px-3 py-4 space-y-1">
-        {NAV_ITEMS.map(({ label, to, icon: Icon }) => (
+        {NAV_ITEMS.map(({ label, to, icon: Icon, desc }) => (
           <NavLink
             key={label}
             to={to}
             end={to === '/'}
+            title={desc}
             className={({ isActive }) =>
-              `w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${
+              `group relative w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-all duration-200 ${
                 isActive
-                  ? 'bg-base-elevated text-text-primary shadow-card'
+                  ? 'text-text-primary shadow-card border-l-2 border-battery'
                   : 'text-text-muted hover:text-text-primary hover:bg-base-elevated/60'
               }`
             }
+            style={({ isActive }) =>
+              isActive
+                ? {
+                    background:
+                      'linear-gradient(135deg, rgba(124,158,255,0.12) 0%, rgba(124,158,255,0.04) 100%)',
+                  }
+                : {}
+            }
           >
-            <Icon className="w-4 h-4 shrink-0" />
+            <Icon className="w-4 h-4 shrink-0 transition-transform duration-200 group-hover:translate-x-0.5" />
             <span>{label}</span>
 
             {/* Critical Alert Badge */}
@@ -98,7 +113,6 @@ export default function Sidebar() {
               </span>
             )}
 
-            {/* Active dot rendered via NavLink's isActive */}
             <span className="ml-auto">
               <ActiveDot to={to} />
             </span>
@@ -106,23 +120,21 @@ export default function Sidebar() {
         ))}
       </nav>
 
-      <div className="px-4 py-4 border-t border-base-border">
-        <div className="rounded-lg bg-base-elevated px-3 py-3 space-y-1">
-          <p className="text-[10px] uppercase tracking-wider text-text-faint">Facility</p>
+      <div className="px-4 py-3 border-t border-base-border space-y-3">
+        <div className="rounded-lg bg-base-elevated/80 border border-base-border/50 px-3 py-3 space-y-1">
+          <div className="flex items-center justify-between">
+            <p className="text-[10px] uppercase tracking-wider text-text-faint">Facility</p>
+            <span className="w-2 h-2 rounded-full bg-gridok animate-pulse" />
+          </div>
           <p className="text-sm text-text-primary font-medium">St. Vital General</p>
           <p className="text-xs text-text-faint">7 departments · 1 microgrid</p>
+        </div>
+
+        {/* API Endpoint Footer */}
+        <div className="text-[9px] font-mono text-text-faint text-center tracking-wider">
+          API: http://127.0.0.1:8000
         </div>
       </div>
     </aside>
   )
-}
-
-// Small helper: renders the battery-coloured active dot only on the current route.
-// Using a separate component lets us call useLocation without prop-drilling.
-import { useLocation } from 'react-router-dom'
-
-function ActiveDot({ to }) {
-  const { pathname } = useLocation()
-  const isActive = to === '/' ? pathname === '/' : pathname.startsWith(to)
-  return isActive ? <span className="w-1.5 h-1.5 rounded-full bg-battery inline-block" /> : null
 }

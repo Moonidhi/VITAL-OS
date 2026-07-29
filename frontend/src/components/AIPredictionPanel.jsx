@@ -1,23 +1,4 @@
-/**
- * AIPredictionPanel
- *
- * Self-contained component that polls /ai/predict (every 10 s) and
- * /ai/status (every 30 s) using the existing usePolledEndpoint hook
- * and renders the model's output in the VITAL-OS design system.
- *
- * Handles three states cleanly:
- *   1. Backend unreachable / loading
- *   2. Model not yet trained (< 10 simulation intervals)
- *   3. Prediction ready — show all four fields
- */
-
 import { usePolledEndpoint } from '../useApi.js'
-
-// prediction + predError are now passed as props from App.jsx.
-// Only /ai/status is polled internally (training metadata is only
-// used here, so no reason to lift it further up the tree).
-
-// ── Risk level config ────────────────────────────────────────────────────────
 
 const RISK_CONFIG = {
   LOW: {
@@ -43,8 +24,6 @@ const RISK_CONFIG = {
   },
 }
 
-// ── Icons ────────────────────────────────────────────────────────────────────
-
 function BrainIcon({ color = '#7C9EFF' }) {
   return (
     <svg viewBox="0 0 20 20" fill="none" className="w-4 h-4">
@@ -68,7 +47,30 @@ function LiveDot() {
   )
 }
 
-// ── Sub-components ───────────────────────────────────────────────────────────
+function ConfidenceMeter({ confidence = 0 }) {
+  let barColor = '#3DD68C'
+  if (confidence < 70) barColor = '#FF5C5C'
+  else if (confidence < 85) barColor = '#F5A623'
+
+  return (
+    <div className="flex flex-col gap-1.5">
+      <div className="flex items-center justify-between">
+        <span className="text-[10px] uppercase tracking-wider text-text-faint">
+          Confidence
+        </span>
+        <span className="font-mono text-xs font-semibold" style={{ color: barColor }}>
+          {confidence.toFixed(1)}%
+        </span>
+      </div>
+      <div className="w-full bg-base-border h-1.5 rounded-full overflow-hidden">
+        <div
+          className="h-full rounded-full transition-all duration-700"
+          style={{ width: `${Math.min(100, Math.max(0, confidence))}%`, backgroundColor: barColor }}
+        />
+      </div>
+    </div>
+  )
+}
 
 function MetricBlock({ label, value, unit, accent = '#E8EDF4' }) {
   return (
@@ -83,9 +85,7 @@ function MetricBlock({ label, value, unit, accent = '#E8EDF4' }) {
         >
           {value}
         </span>
-        {unit && (
-          <span className="text-xs text-text-faint">{unit}</span>
-        )}
+        {unit && <span className="text-xs text-text-faint">{unit}</span>}
       </div>
     </div>
   )
@@ -116,12 +116,20 @@ function RiskMeter({ level }) {
   )
 }
 
-function RecommendationBox({ text }) {
+function RecommendationBox({ text, riskLevel = 'LOW' }) {
+  const cfg = RISK_CONFIG[riskLevel] || RISK_CONFIG.LOW
+
   return (
-    <div className="rounded-lg bg-base-elevated border border-base-border px-3.5 py-3">
-      <p className="text-[10px] uppercase tracking-wider text-text-faint mb-1.5">
-        AI Recommendation
-      </p>
+    <div
+      className="rounded-lg bg-base-elevated border border-base-border border-l-2 px-3.5 py-3 transition-all duration-300"
+      style={{ borderLeftColor: cfg.color, backgroundColor: `${cfg.color}08` }}
+    >
+      <div className="flex items-center justify-between mb-1.5">
+        <p className="text-[10px] uppercase tracking-wider text-text-faint font-semibold">
+          AI Recommendation
+        </p>
+        <span className="w-1.5 h-1.5 rounded-full animate-pulsedot" style={{ backgroundColor: cfg.color }} />
+      </div>
       <p className="text-sm text-text-primary leading-relaxed">{text}</p>
     </div>
   )
@@ -140,17 +148,22 @@ function TrainingFooter({ status }) {
   }
 
   return (
-    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-text-faint">
-      <span className="flex items-center gap-1.5">
-        <span className="w-1.5 h-1.5 rounded-full bg-gridok inline-block" />
-        Model trained
-      </span>
-      <span className="text-base-border">·</span>
-      <span>{status.training_samples} samples</span>
-      <span className="text-base-border">·</span>
-      <span>RMSE {status.rmse?.toFixed(2)} kW</span>
-      <span className="text-base-border">·</span>
-      <span className="font-mono text-[10px] text-text-faint">{status.model}</span>
+    <div className="space-y-1.5">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-text-faint">
+        <span className="flex items-center gap-1.5">
+          <span className="w-1.5 h-1.5 rounded-full bg-gridok inline-block" />
+          Model trained
+        </span>
+        <span className="text-base-border">·</span>
+        <span>{status.training_samples} samples</span>
+        <span className="text-base-border">·</span>
+        <span>RMSE {status.rmse?.toFixed(2)} kW</span>
+        <span className="text-base-border">·</span>
+        <span className="font-mono text-[10px] text-text-faint">{status.model}</span>
+      </div>
+      <p className="text-[10px] text-text-faint italic">
+        Confidence derived from model RMSE relative to mean load. Not a probabilistic guarantee.
+      </p>
     </div>
   )
 }
@@ -162,12 +175,11 @@ function NotTrainedPlaceholder() {
       <div>
         <p className="text-sm text-text-muted font-medium">Model not yet trained</p>
         <p className="text-xs text-text-faint mt-1 max-w-sm">
-          The AI model needs at least 10 simulation intervals.
-          Use{' '}
+          The AI model needs at least 10 simulation intervals. Use{' '}
           <code className="font-mono text-[11px] text-battery bg-base-elevated px-1 py-0.5 rounded">
             GET /simulation/run
-          </code>
-          {' '}or click <strong className="text-text-muted font-medium">Refresh</strong> in the header.
+          </code>{' '}
+          or click <strong className="text-text-muted font-medium">Refresh</strong> in the header.
         </p>
       </div>
     </div>
@@ -179,30 +191,32 @@ function LoadingPlaceholder() {
     <div className="rounded-lg border border-dashed border-base-border px-4 py-8 flex flex-col items-center gap-3 text-center">
       <span className="w-2.5 h-2.5 rounded-full bg-battery animate-pulsedot inline-block" />
       <p className="text-sm text-text-muted">Waiting for AI prediction…</p>
-      <p className="text-xs text-text-faint">
-        Run the simulation to generate training data.
-      </p>
+      <p className="text-xs text-text-faint">Run the simulation to generate training data.</p>
     </div>
   )
 }
 
-// ── Main export ──────────────────────────────────────────────────────────────
-
-export default function AIPredictionPanel({ prediction, predError, predLoading }) {
+export default function AIPredictionPanel({ prediction, predError, predLoading, currentLoad = 0 }) {
   const { data: aiStatus } = usePolledEndpoint('/ai/status', 30000)
 
-  // 503 from the backend means "not enough simulation data to train"
   const notTrained =
-    predError?.includes('503') ||
-    (aiStatus !== null && aiStatus?.trained === false)
+    predError?.includes('503') || (aiStatus !== null && aiStatus?.trained === false)
 
   const isLoading = predLoading && !prediction && !notTrained
   const showPrediction = !isLoading && !notTrained && prediction
 
+  // Calculate delta if currentLoad & predicted_load exist
+  const predictedLoad = prediction?.predicted_load ?? 0
+  const deltaKw = predictedLoad - currentLoad
+  const deltaPct = currentLoad > 0 ? (deltaKw / currentLoad) * 100 : 0
+
+  let deltaColor = '#8B95A7'
+  if (deltaKw > 0.5) deltaColor = '#FF5C5C'
+  else if (deltaKw < -0.5) deltaColor = '#3DD68C'
+
   return (
     <div className="bg-base-surface rounded-xl border border-base-border shadow-card p-4">
-
-      {/* ── Panel header ───────────────────────────────────────────────── */}
+      {/* Panel header */}
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-2.5">
           <div className="w-8 h-8 rounded-lg bg-battery/10 border border-battery/20 flex items-center justify-center shrink-0">
@@ -212,9 +226,7 @@ export default function AIPredictionPanel({ prediction, predError, predLoading }
             <p className="text-xs font-medium text-text-muted uppercase tracking-wider">
               AI Load Forecast
             </p>
-            <p className="text-[10px] text-text-faint mt-0.5">
-              GradientBoosting · 15-min ahead
-            </p>
+            <p className="text-[10px] text-text-faint mt-0.5">GradientBoosting · 15-min ahead</p>
           </div>
         </div>
 
@@ -226,13 +238,26 @@ export default function AIPredictionPanel({ prediction, predError, predLoading }
         )}
       </div>
 
-      {/* ── States ─────────────────────────────────────────────────────── */}
-      {isLoading   && <LoadingPlaceholder />}
-      {notTrained  && <NotTrainedPlaceholder />}
+      {isLoading && <LoadingPlaceholder />}
+      {notTrained && <NotTrainedPlaceholder />}
 
-      {/* ── Prediction content ─────────────────────────────────────────── */}
       {showPrediction && (
         <div className="flex flex-col gap-4">
+          {/* Delta Row */}
+          {currentLoad > 0 && (
+            <div className="bg-base-elevated/60 border border-base-border/60 rounded-lg p-2.5 flex items-center justify-between text-xs font-mono">
+              <span className="text-text-faint">
+                Current: <strong className="text-text-primary">{currentLoad.toFixed(1)} kW</strong>
+              </span>
+              <span className="text-text-faint">→</span>
+              <span className="text-text-faint">
+                Predicted: <strong className="text-critical">{predictedLoad.toFixed(1)} kW</strong>
+              </span>
+              <span style={{ color: deltaColor }} className="font-semibold">
+                ({deltaKw >= 0 ? '+' : ''}{deltaKw.toFixed(1)} kW {deltaKw >= 0 ? '▲' : '▼'} {deltaPct >= 0 ? '+' : ''}{deltaPct.toFixed(1)}%)
+              </span>
+            </div>
+          )}
 
           {/* Metrics row */}
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-4 pb-4 border-b border-base-border">
@@ -242,26 +267,19 @@ export default function AIPredictionPanel({ prediction, predError, predLoading }
               unit="kW"
               accent="#FF7849"
             />
-            <MetricBlock
-              label="Confidence"
-              value={prediction.confidence?.toFixed(1) ?? '—'}
-              unit="%"
-              accent="#7C9EFF"
-            />
+            <ConfidenceMeter confidence={prediction.confidence ?? 0} />
             <div className="col-span-2 sm:col-span-1">
               <RiskMeter level={prediction.risk_level ?? 'LOW'} />
             </div>
           </div>
 
           {/* Recommendation */}
-          <RecommendationBox text={prediction.recommendation ?? '—'} />
+          <RecommendationBox text={prediction.recommendation ?? '—'} riskLevel={prediction.risk_level ?? 'LOW'} />
 
           {/* Training status footer */}
           <TrainingFooter status={aiStatus} />
-
         </div>
       )}
-
     </div>
   )
 }

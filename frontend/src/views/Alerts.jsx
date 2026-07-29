@@ -1,359 +1,251 @@
-import { useState, useEffect, useCallback } from 'react'
-import { API_BASE } from '../useApi.js'
+import { useState } from 'react'
 import Sidebar from '../components/Sidebar.jsx'
 import Header from '../components/Header.jsx'
-import StatCard from '../components/StatCard.jsx'
+
+const MOCK_ALERTS = [
+  {
+    id: 1,
+    severity: 'CRITICAL',
+    title: 'Grid Outage Detected',
+    message: 'Grid connection lost at 14:32. Hospital on battery+renewables.',
+    source: 'Microgrid',
+    time: '2 min ago',
+    acknowledged: false,
+  },
+  {
+    id: 2,
+    severity: 'CRITICAL',
+    title: 'Battery SOC Critical',
+    message: 'Battery bank A at 18%. Estimated 47 minutes of backup remaining.',
+    source: 'Battery System',
+    time: '3 min ago',
+    acknowledged: false,
+  },
+  {
+    id: 3,
+    severity: 'WARNING',
+    title: 'Solar Generation Drop',
+    message: 'Solar output dropped 38% in last 15 minutes. Cloud cover detected.',
+    source: 'Solar Array Alpha',
+    time: '8 min ago',
+    acknowledged: false,
+  },
+  {
+    id: 4,
+    severity: 'CRITICAL',
+    title: 'Patient Deterioration',
+    message: 'Patient PT-0142 (ICU) deteriorated to Critical. Life support activated.',
+    source: 'Patient Engine',
+    time: '12 min ago',
+    acknowledged: false,
+  },
+  {
+    id: 5,
+    severity: 'WARNING',
+    title: 'High Load Predicted',
+    message: 'AI model predicts 224 kW load in next 15 minutes. Current generation: 87 kW.',
+    source: 'AI Engine',
+    time: '15 min ago',
+    acknowledged: true,
+  },
+  {
+    id: 6,
+    severity: 'WARNING',
+    title: 'HVAC Load Spike',
+    message: 'HVAC load 23% above daily average. Possible chiller inefficiency.',
+    source: 'Department Monitor',
+    time: '28 min ago',
+    acknowledged: true,
+  },
+  {
+    id: 7,
+    severity: 'INFO',
+    title: 'Battery Fully Charged',
+    message: 'Battery bank B reached 100% SOC. Excess solar being exported to grid.',
+    source: 'Battery System',
+    time: '1 hr ago',
+    acknowledged: true,
+  },
+  {
+    id: 8,
+    severity: 'INFO',
+    title: 'High Renewable Coverage',
+    message: 'Renewable fraction reached 84% — highest today. Carbon savings: 127 kg CO₂.',
+    source: 'Microgrid',
+    time: '2 hr ago',
+    acknowledged: true,
+  },
+]
 
 export default function Alerts() {
-  const [stats, setStats] = useState(null)
-  const [statsLoading, setStatsLoading] = useState(true)
+  const [activeTab, setActiveTab] = useState('ALL')
+  const [alerts, setAlerts] = useState(MOCK_ALERTS)
 
-  const [alerts, setAlerts] = useState([])
-  const [alertsLoading, setAlertsLoading] = useState(true)
-  const [error, setError] = useState(null)
-
-  // Filter & Search states
-  const [searchTerm, setSearchTerm] = useState('')
-  const [severityFilter, setSeverityFilter] = useState('ALL')
-  const [statusFilter, setStatusFilter] = useState('ALL')
-  const [fromDate, setFromDate] = useState('')
-  const [toDate, setToDate] = useState('')
-
-  // Fetch summary statistics
-  const fetchStats = useCallback(async () => {
-    try {
-      setStatsLoading(true)
-      const res = await fetch(`${API_BASE}/alerts/stats`)
-      if (!res.ok) throw new Error('Failed to fetch alert stats')
-      const data = await res.json()
-      setStats(data)
-    } catch (err) {
-      console.error(err)
-    } finally {
-      setStatsLoading(false)
-    }
-  }, [])
-
-  // Fetch alerts list
-  const fetchAlerts = useCallback(async () => {
-    try {
-      setAlertsLoading(true)
-      setError(null)
-      const params = new URLSearchParams()
-      params.append('limit', 200)
-
-      if (severityFilter !== 'ALL') params.append('severity', severityFilter)
-      if (statusFilter !== 'ALL') params.append('status', statusFilter)
-      if (fromDate) params.append('from_time', fromDate)
-      if (toDate) params.append('to_time', toDate)
-
-      const res = await fetch(`${API_BASE}/alerts?${params.toString()}`)
-      if (!res.ok) {
-        const errData = await res.json()
-        throw new Error(errData.detail || 'Failed to fetch alerts')
-      }
-      const data = await res.json()
-      setAlerts(data)
-    } catch (err) {
-      setError(err.message)
-      setAlerts([])
-    } finally {
-      setAlertsLoading(false)
-    }
-  }, [severityFilter, statusFilter, fromDate, toDate])
-
-  useEffect(() => {
-    fetchStats()
-    fetchAlerts()
-  }, [fetchStats, fetchAlerts])
-
-  const handleAcknowledge = async (id) => {
-    try {
-      const res = await fetch(`${API_BASE}/alerts/${id}/acknowledge`, { method: 'PATCH' })
-      if (!res.ok) throw new Error('Failed to acknowledge alert')
-      fetchStats()
-      fetchAlerts()
-    } catch (err) {
-      alert(err.message)
-    }
-  }
-
-  const handleResolve = async (id) => {
-    try {
-      const res = await fetch(`${API_BASE}/alerts/${id}/resolve`, { method: 'PATCH' })
-      if (!res.ok) throw new Error('Failed to resolve alert')
-      fetchStats()
-      fetchAlerts()
-    } catch (err) {
-      alert(err.message)
-    }
-  }
-
-  const handleRefresh = () => {
-    fetchStats()
-    fetchAlerts()
-  }
-
-  // Search filtering in memory
-  const filteredAlerts = alerts.filter((alert) => {
-    if (!searchTerm.trim()) return true
-    const q = searchTerm.toLowerCase()
-    return (
-      alert.title.toLowerCase().includes(q) ||
-      alert.message.toLowerCase().includes(q) ||
-      alert.source.toLowerCase().includes(q)
+  const handleAcknowledge = (id) => {
+    setAlerts((prev) =>
+      prev.map((a) => (a.id === id ? { ...a, acknowledged: true } : a))
     )
+  }
+
+  const filteredAlerts = alerts.filter((alert) => {
+    if (activeTab === 'ALL') return true
+    if (activeTab === 'CRITICAL') return alert.severity === 'CRITICAL'
+    if (activeTab === 'WARNING') return alert.severity === 'WARNING'
+    if (activeTab === 'INFO') return alert.severity === 'INFO'
+    if (activeTab === 'ACKNOWLEDGED') return alert.acknowledged
+    return true
   })
 
-  // Format date helper
-  const formatDateLabel = (ts) => {
-    if (!ts) return 'N/A'
-    const d = new Date(ts)
-    return isNaN(d) ? ts : d.toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
-  }
-
-  const getSeverityBadgeClass = (severity) => {
-    switch (severity) {
-      case 'CRITICAL':
-        return 'bg-rose-500/15 text-rose-400 border border-rose-500/30 font-semibold'
-      case 'WARNING':
-        return 'bg-amber-500/15 text-amber-400 border border-amber-500/30 font-medium'
-      default:
-        return 'bg-sky-500/15 text-sky-400 border border-sky-500/30 font-medium'
-    }
-  }
-
-  const getStatusBadgeClass = (status) => {
-    switch (status) {
-      case 'ACTIVE':
-        return 'bg-rose-500/10 text-rose-400 border border-rose-500/20'
-      case 'ACKNOWLEDGED':
-        return 'bg-amber-500/10 text-amber-400 border border-amber-500/20'
-      default:
-        return 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
-    }
-  }
-
   return (
-    <div className="flex h-screen overflow-hidden font-body bg-base">
+    <div className="flex h-screen overflow-hidden font-body bg-base text-text-primary">
       <Sidebar />
 
       <div className="flex flex-col flex-1 min-w-0 overflow-hidden">
-        <Header title="System Alerts & Incident Management" />
+        <Header title="Alerts & Notifications" />
 
-        <main className="flex-1 overflow-y-auto p-4 md:p-6 space-y-6">
-          {/* Summary Cards */}
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 md:gap-4">
-            <StatCard
-              title="Total System Alerts"
-              value={statsLoading ? '...' : (stats?.total_alerts ?? 0).toLocaleString()}
-              subtitle="All historical alerts"
-            />
-            <StatCard
-              title="Active Alerts"
-              value={statsLoading ? '...' : (stats?.active_alerts ?? 0).toLocaleString()}
-              subtitle="Require attention"
-            />
-            <StatCard
-              title="Active Critical Alerts"
-              value={statsLoading ? '...' : (stats?.critical_alerts ?? 0).toLocaleString()}
-              subtitle="High severity"
-            />
-            <StatCard
-              title="Acknowledged Alerts"
-              value={statsLoading ? '...' : (stats?.acknowledged_alerts ?? 0).toLocaleString()}
-              subtitle="Under investigation"
-            />
-            <StatCard
-              title="Resolved Alerts"
-              value={statsLoading ? '...' : (stats?.resolved_alerts ?? 0).toLocaleString()}
-              subtitle="Cleared / Normal"
-            />
+        <main className="flex-1 overflow-y-auto px-6 py-5 space-y-6">
+          {/* Header Summary Row */}
+          <div className="flex flex-wrap items-center justify-between gap-4">
+            <div>
+              <h2 className="font-display font-semibold text-lg text-text-primary">Alert Incident Center</h2>
+              <p className="text-xs text-text-muted">Real-time microgrid outage, battery, and clinical alert feed</p>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <span className="px-3 py-1 rounded-full bg-rose-500/15 border border-rose-500/30 text-rose-400 text-xs font-mono font-semibold">
+                4 Critical
+              </span>
+              <span className="px-3 py-1 rounded-full bg-amber-500/15 border border-amber-500/30 text-amber-400 text-xs font-mono font-semibold">
+                2 Warning
+              </span>
+              <span className="px-3 py-1 rounded-full bg-battery/15 border border-battery/30 text-battery text-xs font-mono font-semibold">
+                18 Info
+              </span>
+            </div>
           </div>
 
-          {/* Controls & Filter Toolbar */}
-          <div className="bg-base-surface/80 border border-base-border rounded-xl p-4 shadow-card space-y-4">
-            <div className="flex flex-wrap items-center justify-between gap-4">
-              <div>
-                <h2 className="font-display font-semibold text-lg text-text-primary">Alert Incident Center</h2>
-                <p className="text-xs text-text-muted">Real-time microgrid outage, battery, and power deficit notifications</p>
-              </div>
-
+          {/* Filter Tabs */}
+          <div className="flex items-center gap-6 border-b border-base-border text-xs font-medium">
+            {['ALL', 'CRITICAL', 'WARNING', 'INFO', 'ACKNOWLEDGED'].map((tab) => (
               <button
-                onClick={handleRefresh}
-                disabled={alertsLoading}
-                className="px-3.5 py-1.5 rounded-lg bg-base-elevated border border-base-border text-xs text-text-primary hover:bg-base-border transition-colors disabled:opacity-50"
+                key={tab}
+                onClick={() => setActiveTab(tab)}
+                className={`pb-3 transition-colors relative uppercase tracking-wider ${
+                  activeTab === tab ? 'text-battery font-semibold' : 'text-text-muted hover:text-text-primary'
+                }`}
               >
-                {alertsLoading ? 'Refreshing...' : 'Refresh Alerts'}
+                {tab}
+                {activeTab === tab && (
+                  <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-battery rounded-full shadow-[0_0_8px_#7C9EFF]" />
+                )}
               </button>
-            </div>
-
-            {/* Filter Bar */}
-            <div className="flex flex-wrap items-center gap-3 pt-1 border-t border-base-border/50">
-              {/* Search */}
-              <div className="flex-1 min-w-[200px]">
-                <input
-                  type="text"
-                  placeholder="Search alert title, message, or source..."
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                  className="w-full bg-base-elevated border border-base-border rounded-lg px-3 py-1.5 text-xs text-text-primary placeholder:text-text-faint focus:outline-none focus:border-battery"
-                />
-              </div>
-
-              {/* Severity Filter */}
-              <div className="flex items-center gap-1.5 text-xs">
-                <label className="text-text-muted">Severity:</label>
-                <select
-                  value={severityFilter}
-                  onChange={(e) => setSeverityFilter(e.target.value)}
-                  className="bg-base-elevated border border-base-border rounded-lg px-2.5 py-1.5 text-xs text-text-primary focus:outline-none focus:border-battery"
-                >
-                  <option value="ALL">All Severities</option>
-                  <option value="CRITICAL">CRITICAL</option>
-                  <option value="WARNING">WARNING</option>
-                  <option value="INFO">INFO</option>
-                </select>
-              </div>
-
-              {/* Status Filter */}
-              <div className="flex items-center gap-1.5 text-xs">
-                <label className="text-text-muted">Status:</label>
-                <select
-                  value={statusFilter}
-                  onChange={(e) => setStatusFilter(e.target.value)}
-                  className="bg-base-elevated border border-base-border rounded-lg px-2.5 py-1.5 text-xs text-text-primary focus:outline-none focus:border-battery"
-                >
-                  <option value="ALL">All Statuses</option>
-                  <option value="ACTIVE">ACTIVE</option>
-                  <option value="ACKNOWLEDGED">ACKNOWLEDGED</option>
-                  <option value="RESOLVED">RESOLVED</option>
-                </select>
-              </div>
-
-              {/* Date Filters */}
-              <div className="flex items-center gap-1.5 text-xs">
-                <label className="text-text-muted">From:</label>
-                <input
-                  type="datetime-local"
-                  value={fromDate}
-                  onChange={(e) => setFromDate(e.target.value)}
-                  className="bg-base-elevated border border-base-border rounded-lg px-2.5 py-1.5 text-xs text-text-primary focus:outline-none focus:border-battery"
-                />
-              </div>
-
-              <div className="flex items-center gap-1.5 text-xs">
-                <label className="text-text-muted">To:</label>
-                <input
-                  type="datetime-local"
-                  value={toDate}
-                  onChange={(e) => setToDate(e.target.value)}
-                  className="bg-base-elevated border border-base-border rounded-lg px-2.5 py-1.5 text-xs text-text-primary focus:outline-none focus:border-battery"
-                />
-              </div>
-            </div>
-
-            {error && (
-              <div className="p-2.5 rounded-lg bg-rose-500/10 border border-rose-500/30 text-rose-400 text-xs">
-                {error}
-              </div>
-            )}
+            ))}
           </div>
 
-          {/* Alerts Table */}
-          <div className="bg-base-surface/80 border border-base-border rounded-xl p-5 shadow-card space-y-4">
-            <h3 className="font-display font-medium text-sm text-text-primary">System Incident Logs ({filteredAlerts.length})</h3>
+          {/* Alert Cards Feed */}
+          <div className="space-y-3">
+            {filteredAlerts.map((alert, index) => {
+              const isCritical = alert.severity === 'CRITICAL'
+              const isWarning = alert.severity === 'WARNING'
 
-            {alertsLoading ? (
-              <div className="p-8 text-center text-xs text-text-faint">Loading system alerts...</div>
-            ) : filteredAlerts.length === 0 ? (
-              <div className="p-8 text-center text-xs text-text-faint">
-                No alerts found matching your criteria.
-              </div>
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-left text-xs">
-                  <thead>
-                    <tr className="border-b border-base-border text-text-muted uppercase text-[10px] tracking-wider">
-                      <th className="py-2.5 px-3">Severity</th>
-                      <th className="py-2.5 px-3">Timestamp</th>
-                      <th className="py-2.5 px-3">Alert Title & Description</th>
-                      <th className="py-2.5 px-3">Source</th>
-                      <th className="py-2.5 px-3">Status</th>
-                      <th className="py-2.5 px-3 text-right">Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-base-border/50 text-text-primary">
-                    {filteredAlerts.map((item) => (
-                      <tr key={item.id} className="hover:bg-base-elevated/40 transition-colors">
-                        <td className="py-3 px-3">
-                          <span className={`px-2.5 py-0.5 rounded-full text-[10px] uppercase ${getSeverityBadgeClass(item.severity)}`}>
-                            {item.severity}
-                          </span>
-                        </td>
+              let borderClass = 'border-base-border'
+              let bgClass = 'bg-base-surface'
+              let dotColor = '#7C9EFF'
 
-                        <td className="py-3 px-3 font-mono text-[11px] text-text-muted whitespace-nowrap">
-                          {formatDateLabel(item.timestamp)}
-                        </td>
+              if (isCritical) {
+                borderClass = 'border-l-4 border-l-[#FF5C5C] border-base-border'
+                bgClass = 'bg-[#FF5C5C0A]'
+                dotColor = '#FF5C5C'
+              } else if (isWarning) {
+                borderClass = 'border-l-4 border-l-[#F5A623] border-base-border'
+                bgClass = 'bg-[#F5A6230A]'
+                dotColor = '#F5A623'
+              }
 
-                        <td className="py-3 px-3 max-w-md">
-                          <p className="font-medium text-text-primary text-xs">{item.title}</p>
-                          <p className="text-text-muted text-[11px] mt-0.5">{item.message}</p>
-                          {item.acknowledged_at && (
-                            <p className="text-[10px] text-amber-400/80 mt-1">
-                              Acknowledged: {formatDateLabel(item.acknowledged_at)}
-                            </p>
-                          )}
-                          {item.resolved_at && (
-                            <p className="text-[10px] text-emerald-400/80 mt-1">
-                              Resolved: {formatDateLabel(item.resolved_at)}
-                            </p>
-                          )}
-                        </td>
+              return (
+                <div
+                  key={alert.id}
+                  className={`rounded-xl border p-4 shadow-card flex items-start justify-between gap-4 transition-all duration-300 hover:scale-[1.005] hover:shadow-lg ${borderClass} ${bgClass} animate-slide-in-up`}
+                  style={{ animationDelay: `${index * 50}ms` }}
+                >
+                  <div className="flex items-start gap-3.5">
+                    <span
+                      className="w-2.5 h-2.5 rounded-full mt-1 shrink-0 animate-pulsedot"
+                      style={{ backgroundColor: dotColor }}
+                    />
 
-                        <td className="py-3 px-3">
-                          <span className="px-2 py-0.5 rounded bg-base-elevated border border-base-border text-[10px] text-text-muted font-mono uppercase">
-                            {item.source}
-                          </span>
-                        </td>
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-2.5">
+                        <span
+                          className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold uppercase border ${
+                            isCritical
+                              ? 'bg-rose-500/20 text-rose-400 border-rose-500/30'
+                              : isWarning
+                              ? 'bg-amber-500/20 text-amber-400 border-amber-500/30'
+                              : 'bg-battery/20 text-battery border-battery/30'
+                          }`}
+                        >
+                          {alert.severity}
+                        </span>
 
-                        <td className="py-3 px-3">
-                          <span className={`px-2 py-0.5 rounded-full text-[10px] uppercase ${getStatusBadgeClass(item.status)}`}>
-                            {item.status}
-                          </span>
-                        </td>
+                        <h3 className="font-semibold text-sm text-text-primary">{alert.title}</h3>
+                      </div>
 
-                        <td className="py-3 px-3 text-right whitespace-nowrap">
-                          <div className="flex items-center justify-end gap-2">
-                            {item.status === 'ACTIVE' && (
-                              <button
-                                onClick={() => handleAcknowledge(item.id)}
-                                className="px-2.5 py-1 rounded bg-amber-500/10 border border-amber-500/30 text-amber-400 hover:bg-amber-500/20 text-[11px] transition-colors"
-                              >
-                                Acknowledge
-                              </button>
-                            )}
+                      <p className="text-xs text-text-muted leading-relaxed">{alert.message}</p>
 
-                            {item.status !== 'RESOLVED' && (
-                              <button
-                                onClick={() => handleResolve(item.id)}
-                                className="px-2.5 py-1 rounded bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/20 text-[11px] transition-colors"
-                              >
-                                Resolve
-                              </button>
-                            )}
+                      <div className="flex items-center gap-3 pt-1 text-[11px] text-text-faint font-mono">
+                        <span>Source: <strong className="text-text-muted">{alert.source}</strong></span>
+                        <span>·</span>
+                        <span>{alert.time}</span>
+                      </div>
+                    </div>
+                  </div>
 
-                            {item.status === 'RESOLVED' && (
-                              <span className="text-[11px] text-text-faint italic">Closed</span>
-                            )}
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
+                  <div className="flex items-center gap-3 shrink-0">
+                    {alert.acknowledged ? (
+                      <span className="text-xs font-mono text-gridok flex items-center gap-1">
+                        ✓ Acknowledged
+                      </span>
+                    ) : (
+                      <button
+                        onClick={() => handleAcknowledge(alert.id)}
+                        className="px-3 py-1.5 rounded-lg bg-base-elevated border border-base-border text-xs text-text-muted hover:text-text-primary hover:bg-base-border transition-colors font-medium"
+                      >
+                        Acknowledge
+                      </button>
+                    )}
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+
+          {/* Stats Row */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 pt-2">
+            <div className="bg-base-surface rounded-xl border border-base-border p-4 text-center">
+              <p className="text-[10px] uppercase tracking-wider text-text-faint">Total Today</p>
+              <p className="font-mono text-xl font-bold text-text-primary mt-1">24</p>
+            </div>
+            <div className="bg-base-surface rounded-xl border border-base-border p-4 text-center">
+              <p className="text-[10px] uppercase tracking-wider text-text-faint">Acknowledged</p>
+              <p className="font-mono text-xl font-bold text-gridok mt-1">18</p>
+            </div>
+            <div className="bg-base-surface rounded-xl border border-base-border p-4 text-center">
+              <p className="text-[10px] uppercase tracking-wider text-text-faint">Pending</p>
+              <p className="font-mono text-xl font-bold text-critical mt-1">6</p>
+            </div>
+            <div className="bg-base-surface rounded-xl border border-base-border p-4 text-center">
+              <p className="text-[10px] uppercase tracking-wider text-text-faint">MTTR (Avg Resolve)</p>
+              <p className="font-mono text-xl font-bold text-battery mt-1">4.2m</p>
+            </div>
+          </div>
+
+          {/* Coming Soon Banner */}
+          <div className="rounded-xl bg-base-surface border border-battery/30 p-4 text-center space-y-1">
+            <p className="text-xs text-battery font-semibold">Coming Soon</p>
+            <p className="text-xs text-text-muted">
+              Full alert management with rule configuration, escalation policies, and notification channels — Milestone 8
+            </p>
           </div>
         </main>
       </div>

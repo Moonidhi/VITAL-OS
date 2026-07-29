@@ -11,16 +11,31 @@ function SignalIcon({ connected }) {
   )
 }
 
-function RefreshIcon() {
+function RefreshIcon({ isRefreshing }) {
   return (
-    <svg viewBox="0 0 16 16" fill="none" className="w-3.5 h-3.5">
+    <svg viewBox="0 0 16 16" fill="none" className={`w-3.5 h-3.5 ${isRefreshing ? 'animate-spin' : ''}`}>
       <path d="M13 8A5 5 0 1 1 8 3c1.4 0 2.6.5 3.5 1.4L13 6" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
       <path d="M11 6h2V4" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   )
 }
 
-export default function Header({ title = "Energy Overview", connected, lastUpdated, onRefresh }) {
+function HamburgerIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" className="w-5 h-5 text-text-muted">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+    </svg>
+  )
+}
+
+export default function Header({
+  title = 'Energy Overview',
+  connected,
+  lastUpdated,
+  onRefresh,
+  systemHealth = 'healthy',
+  isRefreshing = false,
+}) {
   const [clock, setClock] = useState(new Date())
   const health = useHealthCheck(5000)
 
@@ -34,49 +49,81 @@ export default function Header({ title = "Energy Overview", connected, lastUpdat
 
   const pad = (n) => String(n).padStart(2, '0')
   const timeStr = `${pad(clock.getHours())}:${pad(clock.getMinutes())}:${pad(clock.getSeconds())}`
+
+  // Day of week + date format e.g. "Wednesday · 29 Jul 2026"
+  const dayStr = clock.toLocaleDateString('en-IN', { weekday: 'long' })
   const dateStr = clock.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })
+  const fullDateStr = `${dayStr} · ${dateStr}`
 
   const updatedStr = effectiveLastUpdated
     ? `${pad(effectiveLastUpdated.getHours())}:${pad(effectiveLastUpdated.getMinutes())}:${pad(effectiveLastUpdated.getSeconds())}`
     : '—'
 
+  // System Health Indicator colors
+  const healthConfig = {
+    healthy: { dot: 'bg-[#3DD68C]', text: 'text-[#3DD68C]', label: 'System Healthy' },
+    degraded: { dot: 'bg-[#F5A623]', text: 'text-[#F5A623]', label: 'Degraded' },
+    critical: { dot: 'bg-[#FF5C5C]', text: 'text-[#FF5C5C]', label: 'Critical Alert' },
+  }
+  const currentHealth = healthConfig[systemHealth] || healthConfig.healthy
+
   return (
-    <header className="h-16 flex items-center justify-between px-6 border-b border-base-border bg-base-surface/80 backdrop-blur-sm shrink-0">
-      <div className="flex items-center gap-4">
-        <div>
-          <h1 className="font-display font-semibold text-sm text-text-primary tracking-wide">
-            {title}
-          </h1>
-          <p className="text-xs text-text-faint">{dateStr}</p>
+    <header className="relative flex flex-col shrink-0 bg-base-surface/80 backdrop-blur-sm z-30">
+      <div className="h-16 flex items-center justify-between px-6">
+        <div className="flex items-center gap-3">
+          {/* Mobile hamburger icon */}
+          <button className="md:hidden p-1 rounded-md bg-base-elevated border border-base-border">
+            <HamburgerIcon />
+          </button>
+
+          <div>
+            <h1 className="font-display font-semibold text-sm text-text-primary tracking-wide">
+              {title}
+            </h1>
+            <p className="text-xs text-text-faint font-medium">{fullDateStr}</p>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-5">
+          {/* System Health Indicator */}
+          <div className="hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-base-elevated/60 border border-base-border/60">
+            <span className={`w-2 h-2 rounded-full ${currentHealth.dot} animate-pulse`} />
+            <span className={`text-xs font-medium font-mono ${currentHealth.text}`}>
+              {currentHealth.label}
+            </span>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <SignalIcon connected={isConnected} />
+            <span className={`text-xs font-medium ${isConnected ? 'text-gridok' : 'text-gridout'}`}>
+              {isConnected ? 'Connected' : 'Offline'}
+            </span>
+          </div>
+
+          {isConnected && (
+            <span className="hidden lg:inline text-xs text-text-faint font-mono">
+              Updated {updatedStr}
+            </span>
+          )}
+
+          {onRefresh && (
+            <button
+              onClick={onRefresh}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-base-elevated text-text-muted hover:text-text-primary hover:bg-base-border text-xs transition-colors"
+            >
+              <RefreshIcon isRefreshing={isRefreshing} />
+              <span className="hidden sm:inline">Refresh</span>
+            </button>
+          )}
+
+          <div className="text-right">
+            <p className="font-mono text-base font-semibold text-text-primary tracking-widest">{timeStr}</p>
+          </div>
         </div>
       </div>
 
-      <div className="flex items-center gap-5">
-        <div className="flex items-center gap-2">
-          <SignalIcon connected={isConnected} />
-          <span className={`text-xs font-medium ${isConnected ? 'text-gridok' : 'text-gridout'}`}>
-            {isConnected ? 'Backend connected' : 'Backend offline'}
-          </span>
-        </div>
-
-        {isConnected && (
-          <span className="text-xs text-text-faint">
-            Updated {updatedStr}
-          </span>
-        )}
-
-        <button
-          onClick={onRefresh}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-base-elevated text-text-muted hover:text-text-primary hover:bg-base-border text-xs transition-colors"
-        >
-          <RefreshIcon />
-          Refresh
-        </button>
-
-        <div className="text-right">
-          <p className="font-mono text-base font-semibold text-text-primary tracking-widest">{timeStr}</p>
-        </div>
-      </div>
+      {/* Gradient Bottom Border */}
+      <div className="h-px bg-gradient-to-r from-transparent via-base-border to-transparent" />
     </header>
   )
 }

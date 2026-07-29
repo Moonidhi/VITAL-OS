@@ -2,39 +2,89 @@
 @tailwind components;
 @tailwind utilities;
 
-html, body, #root {
-  height: 100%;
-}
+/* ── Base ─────────────────────────────────────────────────── */
+html, body, #root { height: 100%; }
 
 body {
-  background: radial-gradient(ellipse at top, #131922 0%, #0B0F14 60%);
+  background: #0B0F14;
+  background-image:
+    radial-gradient(ellipse 80% 50% at 50% -20%, rgba(124,158,255,0.08) 0%, transparent 60%),
+    radial-gradient(ellipse 60% 40% at 80% 80%, rgba(77,208,196,0.04) 0%, transparent 50%);
   background-attachment: fixed;
 }
 
-::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
-}
-::-webkit-scrollbar-track {
-  background: transparent;
-}
-::-webkit-scrollbar-thumb {
-  background: #252E3D;
-  border-radius: 4px;
-}
-::-webkit-scrollbar-thumb:hover {
-  background: #344056;
+/* ── Scrollbar ────────────────────────────────────────────── */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #252E3D; border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: #344056; }
+
+/* ── Selection ────────────────────────────────────────────── */
+::selection { background: rgba(124,158,255,0.25); color: #E8EDF4; }
+
+/* ── Focus ────────────────────────────────────────────────── */
+:focus-visible { outline: 2px solid #7C9EFF; outline-offset: 2px; border-radius: 4px; }
+
+/* ── Shimmer skeleton ─────────────────────────────────────── */
+.skeleton {
+  background: linear-gradient(90deg, #131922 25%, #1A2230 50%, #131922 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.8s ease-in-out infinite;
+  border-radius: 8px;
 }
 
-:focus-visible {
-  outline: 2px solid #7C9EFF;
-  outline-offset: 2px;
+/* ── Glass card ───────────────────────────────────────────── */
+.card-glass {
+  background: rgba(19, 25, 34, 0.8);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255,255,255,0.06);
 }
 
+/* ── Glow borders ─────────────────────────────────────────── */
+.border-glow-solar  { box-shadow: 0 0 0 1px rgba(245,166,35,0.3),  inset 0 1px 0 rgba(245,166,35,0.1); }
+.border-glow-wind   { box-shadow: 0 0 0 1px rgba(77,208,196,0.3),  inset 0 1px 0 rgba(77,208,196,0.1); }
+.border-glow-battery{ box-shadow: 0 0 0 1px rgba(124,158,255,0.3), inset 0 1px 0 rgba(124,158,255,0.1); }
+.border-glow-critical{ box-shadow: 0 0 0 1px rgba(255,92,92,0.4),  inset 0 1px 0 rgba(255,92,92,0.1); }
+
+/* ── Number transition ────────────────────────────────────── */
+.num-transition { transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1); }
+
+/* ── Table row hover ──────────────────────────────────────── */
+.table-row-hover {
+  transition: background-color 0.15s ease, box-shadow 0.15s ease;
+}
+.table-row-hover:hover {
+  background: rgba(124,158,255,0.06) !important;
+  box-shadow: inset 2px 0 0 #7C9EFF;
+}
+
+/* ── Side panel backdrop ──────────────────────────────────── */
+.panel-backdrop {
+  background: rgba(11, 15, 20, 0.7);
+  backdrop-filter: blur(4px);
+}
+
+/* ── Recharts overrides ───────────────────────────────────── */
+.recharts-tooltip-wrapper .recharts-default-tooltip {
+  background: #1A2230 !important;
+  border: 1px solid #252E3D !important;
+  border-radius: 8px !important;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.4) !important;
+}
+.recharts-cartesian-grid-horizontal line,
+.recharts-cartesian-grid-vertical line {
+  stroke: #252E3D !important;
+}
+.recharts-text { fill: #5A6478 !important; font-family: 'JetBrains Mono', monospace !important; }
+
+/* ── Page transition ──────────────────────────────────────── */
+.page-enter { animation: fade-in 0.25s ease-out, slide-in-up 0.3s ease-out; }
+
+/* ── Reduce motion ────────────────────────────────────────── */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
     animation-duration: 0.01ms !important;
-    animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
   }
 }

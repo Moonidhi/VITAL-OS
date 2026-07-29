@@ -1,11 +1,13 @@
+import React, { useState, useEffect, useRef } from 'react'
+
 const RADIUS = 52
 const STROKE = 9
 const CIRCUMFERENCE = Math.PI * RADIUS // half-circle arc length ≈ 163
 
 function getArcColor(soc) {
-  if (soc >= 60) return '#3DD68C'   // healthy
-  if (soc >= 30) return '#F5A623'   // moderate
-  return '#FF5C5C'                   // critical
+  if (soc >= 60) return '#3DD68C'
+  if (soc >= 30) return '#F5A623'
+  return '#FF5C5C'
 }
 
 function getStatusLabel(soc) {
@@ -15,11 +17,47 @@ function getStatusLabel(soc) {
 }
 
 export default function BatterySocGauge({ soc = 0, action = 'idle' }) {
-  // Arc fills from left → right across the top of a half-circle
-  const fillLength = (soc / 100) * CIRCUMFERENCE
+  const [animatedSoc, setAnimatedSoc] = useState(0)
+  const [isGlowing, setIsGlowing] = useState(false)
+  const prevSocRef = useRef(soc)
+
+  // Ease-out cubic animation from 0 to target over 1200ms
+  useEffect(() => {
+    let animFrame
+    const start = performance.now()
+    const duration = 1200
+    const target = soc
+
+    function frame(now) {
+      const elapsed = now - start
+      const progress = Math.min(elapsed / duration, 1)
+      const eased = 1 - Math.pow(1 - progress, 3)
+      setAnimatedSoc(target * eased)
+      if (progress < 1) {
+        animFrame = requestAnimationFrame(frame)
+      }
+    }
+
+    animFrame = requestAnimationFrame(frame)
+    return () => cancelAnimationFrame(animFrame)
+  }, [soc])
+
+  // Glow arc on >2% change
+  useEffect(() => {
+    if (Math.abs(soc - prevSocRef.current) > 2) {
+      setIsGlowing(true)
+      const timer = setTimeout(() => setIsGlowing(false), 600)
+      prevSocRef.current = soc
+      return () => clearTimeout(timer)
+    }
+    prevSocRef.current = soc
+  }, [soc])
+
+  const displaySoc = animatedSoc
+  const fillLength = (displaySoc / 100) * CIRCUMFERENCE
   const gapLength = CIRCUMFERENCE - fillLength
-  const color = getArcColor(soc)
-  const label = getStatusLabel(soc)
+  const color = getArcColor(displaySoc)
+  const label = getStatusLabel(displaySoc)
 
   const actionLabels = {
     charging: { text: '↑ Charging', color: '#7C9EFF' },
@@ -30,12 +68,12 @@ export default function BatterySocGauge({ soc = 0, action = 'idle' }) {
 
   return (
     <div className="flex flex-col items-center justify-between h-full gap-2">
-      <div className="relative w-36 mt-2" style={{ height: '80px' }}>
+      <div className={`relative w-36 mt-2 transition-all duration-300 ${isGlowing ? 'border-glow-battery rounded-full' : ''}`} style={{ height: '80px' }}>
         <svg
           viewBox="0 0 130 74"
           className="w-full"
           role="img"
-          aria-label={`Battery state of charge: ${soc.toFixed(1)}%`}
+          aria-label={`Battery state of charge: ${displaySoc.toFixed(1)}%`}
         >
           {/* Background track */}
           <path
@@ -53,7 +91,7 @@ export default function BatterySocGauge({ soc = 0, action = 'idle' }) {
             strokeWidth={STROKE}
             strokeLinecap="round"
             strokeDasharray={`${fillLength} ${gapLength}`}
-            style={{ transition: 'stroke-dasharray 0.6s ease, stroke 0.4s ease' }}
+            style={{ transition: 'stroke-dasharray 0.3s ease, stroke 0.4s ease' }}
           />
           {/* Glow filter */}
           <defs>
@@ -71,13 +109,13 @@ export default function BatterySocGauge({ soc = 0, action = 'idle' }) {
             strokeLinecap="round"
             strokeDasharray={`${fillLength} ${gapLength}`}
             filter="url(#glow)"
-            opacity="0.5"
-            style={{ transition: 'stroke-dasharray 0.6s ease' }}
+            opacity={isGlowing ? '0.9' : '0.5'}
+            style={{ transition: 'stroke-dasharray 0.3s ease, opacity 0.3s ease' }}
           />
 
           {/* SOC number */}
           <text x="65" y="60" textAnchor="middle" className="font-mono" fontSize="20" fontWeight="600" fill="#E8EDF4" fontFamily="JetBrains Mono, monospace">
-            {soc.toFixed(1)}
+            {displaySoc.toFixed(1)}
           </text>
           <text x="90" y="56" textAnchor="start" fontSize="10" fill="#8B95A7" fontFamily="Inter, sans-serif">%</text>
 

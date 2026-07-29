@@ -1,33 +1,82 @@
-/**
- * EnergyFlowDiagram — VITAL-OS signature visual element.
- *
- * Shows power flowing: Solar ─┐
- *                             ├─► Battery ─► Hospital
- *                   Wind ─────┘        Grid ─►
- *
- * Animated dashed lines whose direction and speed respond to live data.
- * Lines from dark sources animate rightward; during grid export they
- * reverse. Everything is SVG + CSS animations, no canvas, no lib.
- */
+import React from 'react'
 
 const NODE_STYLE = {
-  solar:    { color: '#F5A623', label: 'Solar',    bg: '#F5A62318' },
-  wind:     { color: '#4DD0C4', label: 'Wind',     bg: '#4DD0C418' },
-  battery:  { color: '#7C9EFF', label: 'Battery',  bg: '#7C9EFF18' },
-  grid:     { color: '#3DD68C', label: 'Grid',     bg: '#3DD68C18' },
+  solar: { color: '#F5A623', label: 'Solar', bg: '#F5A62318' },
+  wind: { color: '#4DD0C4', label: 'Wind', bg: '#4DD0C418' },
+  battery: { color: '#7C9EFF', label: 'Battery', bg: '#7C9EFF18' },
+  grid: { color: '#3DD68C', label: 'Grid', bg: '#3DD68C18' },
   hospital: { color: '#E8EDF4', label: 'Hospital', bg: '#E8EDF408' },
 }
 
-function Node({ x, y, type, value, unit = 'kW', r = 34 }) {
-  const s = NODE_STYLE[type]
+function getBatteryColor(soc) {
+  if (soc >= 60) return '#7C9EFF'
+  if (soc >= 30) return '#F5A623'
+  return '#FF5C5C'
+}
+
+function Node({ x, y, type, value, unit = 'kW', r = 38, isOutage = false, soc = 80 }) {
+  let s = { ...NODE_STYLE[type] }
+
+  if (type === 'grid' && isOutage) {
+    s.color = '#FF5C5C'
+    s.bg = '#FF5C5C18'
+    s.label = 'Grid (OUTAGE)'
+  }
+
+  if (type === 'battery') {
+    const batColor = getBatteryColor(soc)
+    s.color = batColor
+    s.bg = `${batColor}18`
+  }
+
+  const isActive = typeof value === 'number' ? value > 0 : true
+
   return (
     <g transform={`translate(${x}, ${y})`}>
-      <circle cx="0" cy="0" r={r + 8} fill={s.bg} />
-      <circle cx="0" cy="0" r={r} fill="#131922" stroke={s.color} strokeWidth="1.5" />
-      <text x="0" y="-6" textAnchor="middle" fontSize="9" fill={s.color} fontFamily="Inter, sans-serif" fontWeight="600" letterSpacing="0.05em">
+      {/* Outer pulsing ring for active nodes */}
+      {isActive && (
+        <circle
+          cx="0"
+          cy="0"
+          r={r + 12}
+          fill="none"
+          stroke={s.color}
+          strokeWidth="1.5"
+          opacity="0.3"
+          className="animate-pulsedot"
+        />
+      )}
+      <circle cx="0" cy="0" r={r + 6} fill={s.bg} />
+      <circle
+        cx="0"
+        cy="0"
+        r={r}
+        fill="#131922"
+        stroke={s.color}
+        strokeWidth="1.8"
+        style={{ filter: 'drop-shadow(0 2px 8px rgba(0,0,0,0.4))' }}
+      />
+      <text
+        x="0"
+        y="-6"
+        textAnchor="middle"
+        fontSize="9"
+        fill={s.color}
+        fontFamily="Inter, sans-serif"
+        fontWeight="600"
+        letterSpacing="0.05em"
+      >
         {s.label.toUpperCase()}
       </text>
-      <text x="0" y="8" textAnchor="middle" fontSize="13" fill="#E8EDF4" fontFamily="JetBrains Mono, monospace" fontWeight="600">
+      <text
+        x="0"
+        y="8"
+        textAnchor="middle"
+        fontSize="13"
+        fill="#E8EDF4"
+        fontFamily="JetBrains Mono, monospace"
+        fontWeight="600"
+      >
         {typeof value === 'number' ? value.toFixed(1) : value}
       </text>
       <text x="0" y="19" textAnchor="middle" fontSize="8" fill="#8B95A7" fontFamily="Inter, sans-serif">
@@ -37,26 +86,22 @@ function Node({ x, y, type, value, unit = 'kW', r = 34 }) {
   )
 }
 
-/**
- * AnimatedFlow — draws a path with flowing dashes.
- * power > 0 means energy flows along the path forward.
- * power === 0 means no flow (faint static line shown).
- */
 function AnimatedFlow({ d, color, power = 0, reverse = false, delay = '0s' }) {
   const active = power > 0
-  const speed = active ? Math.max(0.4, 2 - power / 80) : null // faster line = more power
+  const strokeWidth = active ? Math.min(4, 1.5 + power / 80) : 2
+  const speed = active ? Math.max(0.4, 2 - power / 80) : null
 
   return (
     <>
-      {/* Base path — always visible, dim */}
-      <path d={d} fill="none" stroke="#252E3D" strokeWidth="2" />
+      {/* Base path */}
+      <path d={d} fill="none" stroke="#252E3D" strokeWidth={strokeWidth} />
       {/* Animated flow dashes */}
       {active && (
         <path
           d={d}
           fill="none"
           stroke={color}
-          strokeWidth="2.5"
+          strokeWidth={strokeWidth + 0.5}
           strokeDasharray="10 10"
           strokeLinecap="round"
           opacity="0.85"
@@ -66,13 +111,13 @@ function AnimatedFlow({ d, color, power = 0, reverse = false, delay = '0s' }) {
           }}
         />
       )}
-      {/* Glow pulse at path end for active flows */}
+      {/* Glow pulse */}
       {active && (
         <path
           d={d}
           fill="none"
           stroke={color}
-          strokeWidth="6"
+          strokeWidth={strokeWidth + 4}
           opacity="0.12"
           strokeDasharray="4 30"
           style={{
@@ -94,62 +139,31 @@ export default function EnergyFlowDiagram({ snapshot }) {
     )
   }
 
-  const solar    = snapshot.solar_kw ?? 0
-  const wind     = snapshot.wind_kw ?? 0
-  const total    = snapshot.total_generation_kw ?? 0
-  const load     = snapshot.total_load_kw ?? 0
-  const soc      = snapshot.battery_soc_percent ?? 0
-  const bPower   = snapshot.battery_power_kw ?? 0
-  const bAction  = snapshot.battery_action ?? 'idle'
-  const gridImp  = snapshot.grid_import_kw ?? 0
-  const gridExp  = snapshot.grid_export_kw ?? 0
-
-  // SVG coordinate layout (viewBox="0 0 540 220")
-  // Solar  (90, 60)  ─┐
-  // Wind   (90,160)  ─┼─► Battery (270, 110) ─► Hospital (440, 110)
-  //                    │
-  //            Grid (270, 195) ────────────────►
+  const solar = snapshot.solar_kw ?? 0
+  const wind = snapshot.wind_kw ?? 0
+  const total = snapshot.total_generation_kw ?? 0
+  const load = snapshot.total_load_kw ?? 0
+  const soc = snapshot.battery_soc_percent ?? 0
+  const bPower = snapshot.battery_power_kw ?? 0
+  const bAction = snapshot.battery_action ?? 'idle'
+  const gridImp = snapshot.grid_import_kw ?? 0
+  const gridExp = snapshot.grid_export_kw ?? 0
+  const isOutage = snapshot.grid_status === 'OUTAGE'
 
   return (
     <div className="w-full h-full">
-      <style>{`
-        @keyframes dashflow {
-          to { stroke-dashoffset: -40; }
-        }
-        @keyframes pulsedot {
-          0%, 100% { opacity: 1; }
-          50% { opacity: 0.35; }
-        }
-      `}</style>
-
-      <svg
-        viewBox="0 0 540 230"
-        className="w-full h-full"
-        aria-label="Live energy flow diagram"
-        role="img"
-      >
+      <svg viewBox="0 0 540 230" className="w-full h-full" aria-label="Live energy flow diagram" role="img">
         {/* === FLOW LINES === */}
-
         {/* Solar → Battery */}
-        <AnimatedFlow
-          d="M 126 68 C 190 68 200 110 234 110"
-          color="#F5A623"
-          power={solar}
-          delay="0s"
-        />
+        <AnimatedFlow d="M 126 68 C 190 68 200 110 234 110" color="#F5A623" power={solar} delay="0s" />
 
         {/* Wind → Battery */}
-        <AnimatedFlow
-          d="M 126 160 C 190 160 200 110 234 110"
-          color="#4DD0C4"
-          power={wind}
-          delay="0.3s"
-        />
+        <AnimatedFlow d="M 126 160 C 190 160 200 110 234 110" color="#4DD0C4" power={wind} delay="0.3s" />
 
         {/* Battery → Hospital */}
         <AnimatedFlow
           d="M 306 110 L 404 110"
-          color="#7C9EFF"
+          color={getBatteryColor(soc)}
           power={bAction === 'discharging' ? bPower : total > 0 ? total : 0}
           delay="0.15s"
         />
@@ -157,8 +171,9 @@ export default function EnergyFlowDiagram({ snapshot }) {
         {/* Grid → Hospital (import) */}
         <AnimatedFlow
           d="M 270 179 C 270 155 360 140 404 115"
-          color="#3DD68C"
+          color={isOutage ? '#FF5C5C' : '#3DD68C'}
           power={gridImp}
+          reverse={isOutage}
           delay="0.5s"
         />
 
@@ -172,14 +187,21 @@ export default function EnergyFlowDiagram({ snapshot }) {
         />
 
         {/* === NODES === */}
-        <Node x={90}  y={68}  type="solar"    value={solar}  />
-        <Node x={90}  y={160} type="wind"     value={wind}   />
-        <Node x={270} y={110} type="battery"  value={soc}    unit="% SOC" r={38} />
-        <Node x={270} y={196} type="grid"     value={gridImp > 0 ? gridImp : gridExp} unit="kW" r={28} />
-        <Node x={440} y={110} type="hospital" value={load}   r={38} />
+        <Node x={90} y={68} type="solar" value={solar} r={38} />
+        <Node x={90} y={160} type="wind" value={wind} r={38} />
+        <Node x={270} y={110} type="battery" value={soc} unit="% SOC" r={42} soc={soc} />
+        <Node x={270} y={196} type="grid" value={gridImp > 0 ? gridImp : gridExp} unit="kW" r={32} isOutage={isOutage} />
+        <Node x={440} y={110} type="hospital" value={load} r={42} />
+
+        {/* Outage Label overlay */}
+        {isOutage && (
+          <text x="270" y="152" textAnchor="middle" fontSize="9" fill="#FF5C5C" fontFamily="Inter, sans-serif" fontWeight="bold" className="animate-pulse">
+            OUTAGE
+          </text>
+        )}
 
         {/* Battery action label */}
-        <text x="270" y="75" textAnchor="middle" fontSize="8" fill="#7C9EFF" fontFamily="Inter, sans-serif" opacity="0.8">
+        <text x="270" y="60" textAnchor="middle" fontSize="8" fill={getBatteryColor(soc)} fontFamily="Inter, sans-serif" opacity="0.9" fontWeight="600">
           {bAction.toUpperCase()}
         </text>
       </svg>
