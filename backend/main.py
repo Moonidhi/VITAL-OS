@@ -28,6 +28,7 @@ microgrid_engine = MicrogridEngine(db_url="sqlite:///./vital_os.db")
 from departments_router import router as departments_router
 from departments import DepartmentEngine
 dept_engine = DepartmentEngine(db_url="sqlite:///./vital_os.db")
+from reports_router import router as reports_router
 
 
 
@@ -360,6 +361,7 @@ app.add_middleware(
 app.include_router(patients_router)
 app.include_router(microgrid_router)
 app.include_router(departments_router)
+app.include_router(reports_router)
 
 
 

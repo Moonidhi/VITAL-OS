@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { useHealthCheck } from '../useApi.js'
+import { useHealthCheck, API_BASE } from '../useApi.js'
 
 function SignalIcon({ connected }) {
   return (
@@ -16,6 +16,14 @@ function RefreshIcon({ isRefreshing }) {
     <svg viewBox="0 0 16 16" fill="none" className={`w-3.5 h-3.5 ${isRefreshing ? 'animate-spin' : ''}`}>
       <path d="M13 8A5 5 0 1 1 8 3c1.4 0 2.6.5 3.5 1.4L13 6" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
       <path d="M11 6h2V4" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  )
+}
+
+function DownloadIcon() {
+  return (
+    <svg viewBox="0 0 16 16" fill="none" className="w-3.5 h-3.5">
+      <path d="M8 2v8m0 0l-3-3m3 3l3-3M3 13h10" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   )
 }
@@ -50,7 +58,6 @@ export default function Header({
   const pad = (n) => String(n).padStart(2, '0')
   const timeStr = `${pad(clock.getHours())}:${pad(clock.getMinutes())}:${pad(clock.getSeconds())}`
 
-  // Day of week + date format e.g. "Wednesday · 29 Jul 2026"
   const dayStr = clock.toLocaleDateString('en-IN', { weekday: 'long' })
   const dateStr = clock.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })
   const fullDateStr = `${dayStr} · ${dateStr}`
@@ -59,7 +66,6 @@ export default function Header({
     ? `${pad(effectiveLastUpdated.getHours())}:${pad(effectiveLastUpdated.getMinutes())}:${pad(effectiveLastUpdated.getSeconds())}`
     : '—'
 
-  // System Health Indicator colors
   const healthConfig = {
     healthy: { dot: 'bg-[#3DD68C]', text: 'text-[#3DD68C]', label: 'System Healthy' },
     degraded: { dot: 'bg-[#F5A623]', text: 'text-[#F5A623]', label: 'Degraded' },
@@ -71,7 +77,6 @@ export default function Header({
     <header className="relative flex flex-col shrink-0 bg-base-surface/80 backdrop-blur-sm z-30">
       <div className="h-16 flex items-center justify-between px-6">
         <div className="flex items-center gap-3">
-          {/* Mobile hamburger icon */}
           <button className="md:hidden p-1 rounded-md bg-base-elevated border border-base-border">
             <HamburgerIcon />
           </button>
@@ -84,8 +89,7 @@ export default function Header({
           </div>
         </div>
 
-        <div className="flex items-center gap-5">
-          {/* System Health Indicator */}
+        <div className="flex items-center gap-4">
           <div className="hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-base-elevated/60 border border-base-border/60">
             <span className={`w-2 h-2 rounded-full ${currentHealth.dot} animate-pulse`} />
             <span className={`text-xs font-medium font-mono ${currentHealth.text}`}>
@@ -106,6 +110,18 @@ export default function Header({
             </span>
           )}
 
+          {/* Download PDF Daily Report Button */}
+          <a
+            href={`${API_BASE}/reports/daily`}
+            target="_blank"
+            rel="noreferrer"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-battery/15 border border-battery/30 text-battery hover:bg-battery/25 text-xs transition-colors font-medium"
+            title="Download Daily PDF Summary Report"
+          >
+            <DownloadIcon />
+            <span className="hidden sm:inline">Download Report</span>
+          </a>
+
           {onRefresh && (
             <button
               onClick={onRefresh}
@@ -122,7 +138,6 @@ export default function Header({
         </div>
       </div>
 
-      {/* Gradient Bottom Border */}
       <div className="h-px bg-gradient-to-r from-transparent via-base-border to-transparent" />
     </header>
   )
